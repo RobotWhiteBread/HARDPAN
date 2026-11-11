@@ -1,22 +1,29 @@
-"""HARDPAN phases 1, 1b and 2: a monophonic synth, rendered offline or played live.
+"""HARDPAN phases 1 to 3: a synth built from first principles.
 
-One sine oscillator and one ADSR envelope, computed one sample at a time in
-float32 at 48 kHz. All of the synthesis math is written out in this file.
-numpy holds the samples, soundfile writes the WAV, sounddevice talks to the
-sound card, and mido reads MIDI.
+Oscillators, envelopes, a resonant filter, and an 8-voice allocator, computed
+one sample at a time in float32 at 48 kHz. All of the synthesis math is
+written out in this file. numpy holds the samples, soundfile writes the WAV,
+sounddevice talks to the sound card, and mido reads MIDI.
 
     python hardpan_proto.py            render a C major arpeggio to
-                                       hardpan_proto.wav and play it
-    python hardpan_proto.py live       play live from a MIDI keyboard, or from
-                                       the computer keyboard if none is connected
+                                       hardpan_proto.wav and play it (phase 1)
+    python hardpan_proto.py live       play the sine voice live from a MIDI
+                                       keyboard, or from the computer keyboard
+                                       if none is connected (phase 1b)
     python hardpan_proto.py live 128   the same, with 128-frame audio blocks
-    python compare_aliasing.py         phase 2: naive versus PolyBLEP saw and
-                                       square, as spectrograms and measurements
+    python compare_aliasing.py         naive versus PolyBLEP saw and square, as
+                                       spectrograms and measurements (phase 2)
+    python hardpan_proto.py demo       render the bass and pad presets to
+                                       hardpan_bass.wav and hardpan_pad.wav and
+                                       play them (phase 3)
 
 Intentionally not implemented yet:
-- Polyphony. There is one voice. A note that starts while another is held takes
-  the voice over (last-note priority), and releasing it falls back to a note
-  that is still held.
+- Polyphony and the presets in live mode. Live mode still plays the phase 1
+  sine voice: eight filtered voices of per-sample Python cannot keep up in real
+  time. That is what the Rust port in phase 4 is for.
+- Self-oscillation. The cookbook biquad is linear and stays stable at any
+  resonance it allows, so it rings and peaks but never sustains a tone on its
+  own. That needs a nonlinear filter with feedback, like a Moog ladder.
 - Velocity (MIDI velocity is read and ignored), pitch bend, glide, sustain pedal.
 - Sample-accurate timing for live notes. A live note starts at the beginning of
   the next audio callback, so it can be late by up to the time between
@@ -25,14 +32,8 @@ Intentionally not implemented yet:
 - Choosing an audio device or MIDI port by hand. Live mode takes ASIO if a
   driver is installed, then WASAPI, then the Windows default, and opens every
   MIDI input present at startup.
-- Any waveform other than sine in the voice. Phase 2 adds sawtooth and square
-  oscillators, naive and PolyBLEP, for compare_aliasing.py to measure. The
-  voice starts using them in phase 3, when there is a filter to tame them.
-- Filters (phase 3).
 - Smoothing for parameters changed while a note sounds. Parameters stay fixed
   for the length of a render.
-- Denormal protection. The release snaps to exactly 0.0 instead of decaying
-  forever, so nothing here lingers near zero yet (phase 3).
 """
 
 import math
@@ -40,6 +41,7 @@ import os
 import sys
 import time
 from collections import deque
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -342,6 +344,13 @@ class ADSR:
         self.stage = stage
         self.distance = self.level - target
 
+    def reset(self):
+        """Drop straight to silence. Only for a voice that has already been faded
+        out (see PolyVoice), where the jump cannot be heard."""
+        self.level = F32(0.0)
+        self.distance = F32(0.0)
+        self.stage = IDLE
+
     def tick(self):
         # Each sample closes the same fraction (1 - c) of the distance between the
         # level and the target. That is a one-pole lowpass filter, and its step
@@ -436,12 +445,9 @@ class MonoVoice:
         return self.osc.tick() * self.env.tick()
 
 
-def render(notes, attack=0.010, decay=0.150, sustain=0.7, release=0.300):
-    """Render (note_number, start_time, duration) tuples, with times in seconds,
-    to a mono float32 buffer at 48 kHz. The buffer runs until the last release
-    has reached silence."""
-    voice = MonoVoice(attack, decay, sustain, release)
-
+def note_events(notes):
+    """(sample, kind, note) events from (note_number, start_time, duration) tuples,
+    in time order. kind is 1 for note-on, 0 for note-off."""
     # Sample-accurate means each note-on and note-off happens on its own sample,
     # the nearest one to its time, rather than at the start of some block.
     # Note-offs sort before note-ons on the same sample (0 before 1). That way a
@@ -454,6 +460,15 @@ def render(notes, attack=0.010, decay=0.150, sustain=0.7, release=0.300):
         events.append((on, 1, note))
         events.append((off, 0, note))
     events.sort()
+    return events
+
+
+def render(notes, attack=0.010, decay=0.150, sustain=0.7, release=0.300):
+    """Render (note_number, start_time, duration) tuples, with times in seconds,
+    to a mono float32 buffer at 48 kHz. The buffer runs until the last release
+    has reached silence."""
+    voice = MonoVoice(attack, decay, sustain, release)
+    events = note_events(notes)
 
     out = []
     n = 0
@@ -466,6 +481,514 @@ def render(notes, attack=0.010, decay=0.150, sustain=0.7, release=0.300):
         out.append(voice.tick())
         n += 1
     return np.array(out, dtype=F32)
+
+
+# Filter and polyphony (phase 3) ---------------------------------------------
+
+# Anything quieter than this is flushed to exactly zero inside the filter; see
+# Biquad.tick. 1e-20 is about -400 dB, far below anything audible.
+FLUSH_BELOW = 1e-20
+
+
+class Biquad:
+    """One second-order filter section with low-pass coefficients from Robert
+    Bristow-Johnson's Audio EQ Cookbook, run in direct form I.
+
+    Every biquad computes the same difference equation:
+
+        y[n] = b0 x[n] + b1 x[n-1] + b2 x[n-2] - a1 y[n-1] - a2 y[n-2]
+
+    The b terms mix the current and two previous inputs. For a low-pass they
+    are in the ratio 1 : 2 : 1, which cancels completely at the Nyquist
+    frequency, the highest frequency there is. The a terms feed back the two
+    previous outputs, and they set the cutoff and the resonance: the feedback
+    makes the filter ring at the cutoff, and the less damped that ringing, the
+    taller and narrower the resonant peak. The cookbook gets the coefficients
+    by taking the classic analog low-pass, 1 / (s^2 + s/Q + 1), and mapping it
+    onto samples with the bilinear transform, adjusted so the cutoff lands
+    exactly where it is asked to.
+
+    Direct form I keeps the past inputs and outputs themselves as its state.
+    That matters because the filter envelope moves the cutoff on every sample.
+    The other common forms store running sums already weighted by the old
+    coefficients, so a fast sweep leaves their state out of step with the new
+    coefficients. Plain past samples stay valid whatever the coefficients are.
+    """
+
+    def __init__(self, sample_rate=SAMPLE_RATE):
+        self.sample_rate = float(sample_rate)
+        self.b0 = self.b1 = self.b2 = self.a1 = self.a2 = F32(0.0)
+        self.reset()
+
+    def reset(self):
+        self.x1 = self.x2 = self.y1 = self.y2 = F32(0.0)
+
+    def set_lowpass(self, cutoff, q):
+        # w0 is the cutoff as an angle around the unit circle, where half a turn
+        # (pi) is the Nyquist frequency.
+        w0 = 2.0 * math.pi * cutoff / self.sample_rate
+        cos_w0 = math.cos(w0)
+        # alpha is the damping. A larger Q means a smaller alpha, less damping, and
+        # a taller, narrower peak at the cutoff.
+        alpha = math.sin(w0) / (2.0 * q)
+        # Dividing everything by a0 normalizes the equation so y[n] itself has a
+        # coefficient of 1. As with the envelope, the arithmetic is done in double
+        # precision and rounded to float32 once.
+        a0 = 1.0 + alpha
+        b1 = (1.0 - cos_w0) / a0
+        self.b0 = self.b2 = F32(0.5 * b1)
+        self.b1 = F32(b1)
+        self.a1 = F32(-2.0 * cos_w0 / a0)
+        self.a2 = F32((1.0 - alpha) / a0)
+
+    def tick(self, x):
+        y = self.b0 * x + self.b1 * self.x1 + self.b2 * self.x2 - self.a1 * self.y1 - self.a2 * self.y2
+        # Denormals. float32 normally stores a number as a 24-bit fraction times a
+        # power of two, down to about 1.2e-38. Below that it gives up bits of the
+        # fraction to reach smaller numbers still, down to 1.4e-45. Those are the
+        # subnormal, or denormal, numbers, and on many x86 CPUs arithmetic on them
+        # takes a slow path: a hundred or more cycles instead of a few. A filter
+        # whose input goes quiet keeps feeding its output back, shrinking it every
+        # sample, so it slides down into that range and lingers there. In a
+        # real-time callback the CPU cost can then jump while nothing audible is
+        # happening, and the block misses its deadline. Flushing anything below
+        # FLUSH_BELOW to exactly zero costs nothing audible and keeps the
+        # arithmetic on the fast path. In Python the interpreter's own overhead
+        # hides the slowdown; it matters in the Rust port.
+        if -FLUSH_BELOW < y < FLUSH_BELOW:
+            y = F32(0.0)
+        self.x2 = self.x1
+        self.x1 = x
+        self.y2 = self.y1
+        self.y1 = y
+        return y
+
+
+# The two section Qs of a fourth-order Butterworth low-pass: 1 / (2 cos(pi/8))
+# and 1 / (2 cos(3 pi/8)). Their product is 1 / sqrt(2), about 0.707.
+BUTTERWORTH_Q = (0.5412, 1.3066)
+
+
+class LowPassFilter:
+    """A resonant low-pass with a 12 or 24 dB per octave slope.
+
+    12 dB: a single biquad. Above the cutoff, every doubling of frequency comes
+    out 12 dB quieter.
+
+    24 dB: two biquads in series, so the slope doubles. That is the slope of the
+    Moog and Juno filters, and it is what makes a closed filter sound dark
+    rather than merely quieter: the saw's bright harmonics fall away fast.
+
+    What cascading does to resonance: two identical sections in series square
+    the whole response, so the peak doubles in decibels as well as the slope,
+    and it narrows. A Q of 4 peaks at +12 dB in one section and +24 dB in two.
+    Even at Q 0.707, where one section is 3 dB down at the cutoff, two are 6 dB
+    down, so the corner sounds lower and rounder than asked. Instead, the two
+    sections here use the fourth-order Butterworth Qs, which together are
+    exactly 3 dB down at the cutoff and flat below it, and resonance goes into
+    the second section only. A cookbook low-pass's gain at its own cutoff equals
+    its Q, so scaling the second section by q / 0.707 makes the gain at the
+    cutoff exactly q in both modes: the same q means the same peak height.
+
+    The cutoff is kept between 20 Hz and 45% of the sample rate. At or above
+    the Nyquist frequency a cutoff means nothing, and well below 20 Hz the
+    float32 coefficients get close enough to 2 and 1 that rounding starts to
+    move the filter noticeably. q runs from 0.5 to MAX_Q.
+    """
+
+    MIN_CUTOFF = 20.0
+    MAX_Q = 20.0
+
+    def __init__(self, slope=24, sample_rate=SAMPLE_RATE):
+        if slope not in (12, 24):
+            raise ValueError(f"slope must be 12 or 24, got {slope}")
+        self.slope = slope
+        self.max_cutoff = 0.45 * sample_rate
+        self.sections = [Biquad(sample_rate) for _ in range(slope // 12)]
+        self._cutoff = self._q = None
+
+    def reset(self):
+        for section in self.sections:
+            section.reset()
+
+    def set(self, cutoff, q):
+        cutoff = min(max(cutoff, self.MIN_CUTOFF), self.max_cutoff)
+        q = min(max(q, 0.5), self.MAX_Q)
+        if cutoff == self._cutoff and q == self._q:
+            return  # nothing has moved, so skip the trigonometry
+        self._cutoff, self._q = cutoff, q
+        if self.slope == 12:
+            self.sections[0].set_lowpass(cutoff, q)
+        else:
+            self.sections[0].set_lowpass(cutoff, BUTTERWORTH_Q[0])
+            self.sections[1].set_lowpass(cutoff, BUTTERWORTH_Q[1] * q / math.sqrt(0.5))
+
+    def tick(self, x):
+        for section in self.sections:
+            x = section.tick(x)
+        return x
+
+
+@dataclass
+class Osc:
+    """One oscillator in a voice. octave and cents offset it from the note
+    played; level is its share of the mix; width is the pulse width, for square
+    waves only.
+
+    Why a few cents of detune sounds thicker: two oscillators a frequency df
+    apart drift in and out of step, so where they line up they reinforce and
+    where they oppose they cancel. Their kth harmonics are k * df apart, so each
+    harmonic swells and dips at its own rate, k times faster than the
+    fundamental. The spectrum never sits still, and the ear hears that constant
+    motion as two sources rather than one: an ensemble, a thicker sound.
+
+    What sets the beating rate: df itself. Cents are a ratio, so df grows with
+    pitch: df = f * (2**(cents/1200) - 1), close to f * cents / 1731. Two saws
+    8 cents apart on A2 (110 Hz) beat 0.5 times a second at the fundamental and
+    5 times a second at the 10th harmonic. The same detune beats twice as fast
+    an octave up, which is why a detune that sounds lush in the middle of the
+    keyboard sounds sour at the top and barely moves at the bottom.
+    """
+
+    wave: str = "saw"  # "saw", "square" or "sine"
+    octave: int = 0
+    cents: float = 0.0
+    level: float = 0.5
+    width: float = 0.5
+
+
+@dataclass
+class Patch:
+    """Everything that defines a sound. Times are in seconds."""
+
+    oscillators: list  # up to three Osc
+    cutoff: float  # Hz, with the filter envelope at zero, for middle C (keytrack shifts it per note)
+    q: float  # resonance: the filter's gain at its cutoff, 0.707 for no peak
+    slope: int  # 12 or 24 dB per octave
+    env_amount: float  # how many octaves the filter envelope opens the cutoff at its peak
+    keytrack: float  # 0: cutoff ignores the note; 1: cutoff follows the note's pitch exactly
+    filter_env: tuple  # attack, decay, sustain, release
+    amp: tuple  # attack, decay, sustain, release
+    gain: float = 1.0
+
+
+# How long a stolen voice takes to fade out before its new note starts. 5 ms
+# matches the envelope's shortest stage: about the fastest fade that does not
+# itself click. The shape is a raised cosine, half a cycle of a cosine from 1
+# down to 0. Unlike a straight line it starts and ends flat, with no corners,
+# and corners in a gain curve are small clicks of their own.
+STEAL_FADE_SECONDS = 0.005
+_FADE_LENGTH = round(STEAL_FADE_SECONDS * SAMPLE_RATE)
+STEAL_FADE = np.array(
+    [0.5 * (1.0 + math.cos(math.pi * (i + 1) / _FADE_LENGTH)) for i in range(_FADE_LENGTH)], dtype=F32
+)
+
+
+class PolyVoice:
+    """Up to three oscillators, mixed, through a low-pass filter, then an amplitude
+    envelope: the classic oscillator, filter, amplifier chain. A second envelope
+    moves the filter cutoff."""
+
+    def __init__(self, patch, sample_rate=SAMPLE_RATE):
+        if not 1 <= len(patch.oscillators) <= 3:
+            raise ValueError("a voice mixes one to three oscillators")
+        self.patch = patch
+        self.oscillators = []
+        for spec in patch.oscillators:
+            if spec.wave == "saw":
+                osc = PolyBlepSaw(sample_rate)
+            elif spec.wave == "square":
+                osc = PolyBlepSquare(sample_rate, spec.width)
+            elif spec.wave == "sine":
+                osc = SineOscillator(sample_rate)
+            else:
+                raise ValueError(f"unknown wave {spec.wave!r}")
+            self.oscillators.append((osc, spec, F32(spec.level)))
+        self.amp_env = ADSR(*patch.amp, sample_rate=sample_rate)
+        self.filter_env = ADSR(*patch.filter_env, sample_rate=sample_rate)
+        self.filter = LowPassFilter(patch.slope, sample_rate)
+        self.note = None
+        self.held = False
+        self.started_at = 0
+        self.released_at = 0
+        self.fade = -1  # position in STEAL_FADE while being stolen, otherwise -1
+        self.pending = None  # the note to start once the fade is done
+        self.pending_since = 0  # when that note was played
+        self.pending_held_for = 0  # if its key was let go during the fade, for how long it was held
+        self.release_in = 0  # samples until a delayed release, 0 for none
+        self.key_cutoff = patch.cutoff
+
+    @property
+    def free(self):
+        return self.fade < 0 and not self.amp_env.active
+
+    def start(self, note, now):
+        """Start a note: on a free voice, on a voice already playing this note
+        (a retrigger), or on a stolen voice once its fade has finished."""
+        if not self.amp_env.active:
+            self.filter.reset()  # nothing left over from this voice's last note
+        self.note = note
+        self.held = True
+        self.started_at = now
+        self.release_in = 0
+        hz = float(midi_to_hz(note))
+        for osc, spec, _ in self.oscillators:
+            # Octaves double the frequency. Cents are hundredths of a semitone,
+            # 1200 to the octave, so +4 cents multiplies it by 2**(4/1200), 1.0023.
+            # The phases are left running rather than reset to 0. Resetting several
+            # oscillators together would start every note with all of them in step,
+            # the same spike each time. Running on, as analog oscillators do, each
+            # note starts from a slightly different alignment.
+            osc.set_frequency(hz * 2.0 ** (spec.octave + spec.cents / 1200.0))
+        # Key tracking: the cutoff follows the note by `keytrack` octaves per octave,
+        # measured from middle C, so a high note is not muffled relative to its own
+        # harmonics while a low one is wide open.
+        self.key_cutoff = self.patch.cutoff * 2.0 ** (self.patch.keytrack * (note - 60) / 12.0)
+        self.amp_env.note_on()
+        self.filter_env.note_on()
+
+    def release(self, now):
+        self.held = False
+        self.released_at = now
+        self.release_in = 0
+        self.amp_env.note_off()
+        self.filter_env.note_off()
+
+    def steal(self, note, now):
+        """Fade this voice out, then start `note` on it."""
+        self.fade = 0
+        self.pending = note
+        self.pending_since = now
+        self.pending_held_for = 0
+
+    def tick(self, now):
+        if self.release_in:
+            self.release_in -= 1
+            if not self.release_in:
+                self.release(now)
+        mix = F32(0.0)
+        for osc, _, level in self.oscillators:
+            mix = mix + osc.tick() * level
+        # The envelope adds octaves to the cutoff, which multiplies it by 2 to the
+        # power of that many octaves. Brightness, like pitch, is heard in ratios: a
+        # sweep from 200 to 400 Hz sounds as big as one from 2 to 4 kHz.
+        sweep = self.patch.env_amount * float(self.filter_env.tick())
+        self.filter.set(self.key_cutoff * 2.0**sweep, self.patch.q)
+        out = self.filter.tick(mix) * self.amp_env.tick()
+        if self.fade >= 0:
+            out = out * STEAL_FADE[self.fade]
+            self.fade += 1
+            if self.fade == len(STEAL_FADE):
+                self._restart(now + 1)
+        return out
+
+    def _restart(self, now):
+        # The fade has reached exactly zero, so the voice is silent and can be
+        # cleared to a clean start without a click.
+        self.fade = -1
+        self.amp_env.reset()
+        self.filter_env.reset()
+        note, held_for = self.pending, self.pending_held_for
+        self.pending = None
+        self.start(note, now)
+        if held_for:
+            # The key was already let go during the fade. The note starts 5 ms
+            # late, so its release comes 5 ms late too and it keeps its full
+            # length. Releasing it now would cut a short note out entirely.
+            self.release_in = held_for
+
+
+class PolySynth:
+    """Eight voices and the decisions about which voice plays which note."""
+
+    VOICES = 8
+
+    def __init__(self, patch, sample_rate=SAMPLE_RATE):
+        self.voices = [PolyVoice(patch, sample_rate) for _ in range(self.VOICES)]
+        self.gain = F32(patch.gain)
+        self.now = 0  # samples since the start, for telling old notes from new
+
+    @property
+    def active(self):
+        return any(not voice.free for voice in self.voices)
+
+    def note_on(self, note):
+        for voice in self.voices:
+            if voice.fade >= 0 and voice.pending == note:
+                voice.pending_held_for = 0  # already on its way in, and held again
+                return
+            if voice.fade < 0 and voice.note == note and not voice.free:
+                # The same note is still sounding: retrigger that voice from its
+                # current level rather than stack a second copy, which would beat
+                # and partly cancel against the first.
+                voice.start(note, self.now)
+                return
+        for voice in self.voices:
+            if voice.free:
+                voice.start(note, self.now)
+                return
+        self._steal(note)
+
+    def _steal(self, note):
+        candidates = [voice for voice in self.voices if voice.fade < 0]
+        if not candidates:
+            # Every voice is already fading out for some other note. Hand this note
+            # to the voice that will finish its fade soonest instead.
+            voice = max(self.voices, key=lambda v: v.fade)
+            voice.pending, voice.pending_since, voice.pending_held_for = note, self.now, 0
+            return
+        releasing = [voice for voice in candidates if not voice.held]
+        if releasing:
+            # The voice released longest ago is the quietest and the closest to
+            # finishing on its own, so cutting it short is the least noticeable.
+            victim = min(releasing, key=lambda v: v.released_at)
+        else:
+            # Every voice is held. Take the oldest note: the one the ear has had
+            # longest to get used to.
+            victim = min(candidates, key=lambda v: v.started_at)
+        victim.steal(note, self.now)
+
+    def note_off(self, note):
+        for voice in self.voices:
+            if voice.fade >= 0 and voice.pending == note:
+                voice.pending_held_for = max(1, self.now - voice.pending_since)
+            elif voice.fade < 0 and voice.held and voice.note == note:
+                voice.release(self.now)
+
+    def tick(self):
+        out = F32(0.0)
+        for voice in self.voices:
+            if not voice.free:
+                out = out + voice.tick(self.now)
+        self.now += 1
+        return out * self.gain
+
+
+def render_poly(notes, patch):
+    """Render (note_number, start_time, duration) tuples through the 8-voice synth
+    to a mono float32 buffer at 48 kHz, running until every voice is silent."""
+    synth = PolySynth(patch)
+    events = note_events(notes)
+    out = []
+    n = 0
+    i = 0
+    while i < len(events) or synth.active:
+        while i < len(events) and events[i][0] == n:
+            _, kind, note = events[i]
+            synth.note_on(note) if kind else synth.note_off(note)
+            i += 1
+        out.append(synth.tick())
+        n += 1
+    return np.array(out, dtype=F32)
+
+
+# Presets ------------------------------------------------------------------
+# Both aim at the README's sound target: dark, driving, 80s. They are starting
+# points for ears, not answers; every value is there to be moved.
+
+BASS = Patch(
+    oscillators=[
+        # Two saws 4 cents either side of the note. A saw has every harmonic, which
+        # is what a filter needs to have something to sweep through. The small
+        # detune makes each harmonic of one beat slowly against the same harmonic
+        # of the other, so the tone moves. It is kept small because the fundamental
+        # of a bass note carries its weight, and wide detune makes that fundamental
+        # swell and dip.
+        Osc("saw", cents=-4.0, level=0.5),
+        Osc("saw", cents=+4.0, level=0.5),
+        # A square an octave down, for weight that does not beat, since nothing
+        # else sits at that pitch. A square has only odd harmonics, so it adds the
+        # low octave without thickening the saws' own harmonics.
+        Osc("square", octave=-1, level=0.45),
+    ],
+    slope=24,  # steep, so the closed filter sounds dark rather than just quieter
+    # Mostly closed: at rest only the lowest few harmonics get through. With key
+    # tracking, the A2 the line sits on rests at about 145 Hz.
+    cutoff=220.0,
+    q=3.5,  # a moderate peak, +11 dB at the cutoff: the sweep reads as a vowel-like "yow", not a whistle
+    env_amount=4.0,  # every note throws the cutoff up 4 octaves, to about 2.3 kHz on A2: the snap
+    keytrack=0.5,  # higher notes open the filter a little more, so the line stays even
+    # Filter envelope: as fast an attack as the envelope allows (5 ms), then a
+    # 600 ms decay. An envelope time here is the time to finish, and the curve is
+    # exponential, so most of the movement comes early: two-thirds of the way
+    # closed after about 65 ms. In a 16th-note line that puts the bite in each
+    # note's first 50 to 100 ms. Sustain 0: while a note is held the filter goes
+    # all the way back to the resting cutoff.
+    filter_env=(0.0, 0.6, 0.0, 0.08),
+    # Amplitude: instant attack for punch, a slight decay so the front of each
+    # note stands out, and a short release so the 16ths stay separate instead of
+    # smearing into a drone.
+    amp=(0.0, 0.3, 0.75, 0.06),
+    gain=0.5,
+)
+
+PAD = Patch(
+    oscillators=[
+        # Wider detune than the bass, 8 cents either side. Over long, slow chords
+        # the beating is the pad's movement, and the pad's low notes are doubled
+        # by other chord tones, so a wavering fundamental matters less.
+        Osc("saw", cents=-8.0, level=0.45),
+        Osc("saw", cents=+8.0, level=0.45),
+        # A quiet square an octave down for warmth underneath.
+        Osc("square", octave=-1, level=0.2),
+    ],
+    slope=24,
+    # The pad never snaps open the way the bass does, so it never sounds bright.
+    # But it keeps the 2nd to 4th harmonics of its chord tones, which is where a
+    # pad's body is. Much lower, and the chords collapse into murky sine tones.
+    cutoff=550.0,
+    q=0.9,  # nearly no peak: resonance on stacked chord tones whistles
+    env_amount=1.5,  # a slow swell of an octave and a half as each chord blooms, to about 1.5 kHz
+    keytrack=0.4,
+    # The filter opens over 1.5 s, settles over 2.5 s at 40% of its sweep (about
+    # 830 Hz), and closes over 3 s after release, slightly slower than the sound
+    # fades.
+    filter_env=(1.5, 2.5, 0.4, 3.0),
+    # Slow attack so chord changes swell in rather than strike; long release so
+    # one chord dissolves into the next. That overlap is also what pushes the
+    # chord changes past 8 voices.
+    amp=(0.9, 1.0, 0.85, 2.5),
+    gain=0.3,
+)
+
+
+def bass_line(bpm=110, bars=8):
+    """A 16th-note line in A minor: the root pumping, with an octave jump every
+    third note (a 3+3+3+3+4 pattern that pulls against the beat), over A, F, D
+    and E, two bars each. E major rather than E minor: the raised G sharp of the
+    harmonic minor gives the turnaround its menace."""
+    step = 60.0 / bpm / 4
+    roots = [45, 45, 41, 41, 38, 38, 40, 40]  # A2, F2, D2, E2
+    pattern = [0, 0, 12, 0, 0, 12, 0, 0, 12, 0, 0, 12, 0, 12, 7, 12]
+    notes = []
+    for bar in range(bars):
+        for i, interval in enumerate(pattern):
+            start = (bar * 16 + i) * step
+            notes.append((roots[bar % len(roots)] + interval, start, 0.55 * step))
+    return notes
+
+
+def pad_progression(bpm=110):
+    """The same progression as slow chords, two bars each, then an A minor 9
+    chord rolled in one note at a time. Each chord change overlaps the last
+    chord's release, so it needs 10 voices and steals the releasing ones. The
+    final chord needs 10 held voices, so as its 9th and 10th notes arrive its
+    two lowest notes are faded out to make room: the stealing you can hear."""
+    bar = 4 * 60.0 / bpm
+    chords = [
+        [45, 52, 57, 60, 64],  # A minor: A2 E3 A3 C4 E4
+        [41, 48, 57, 60, 65],  # F major: F2 C3 A3 C4 F4
+        [38, 50, 57, 62, 65],  # D minor: D2 D3 A3 D4 F4
+        [40, 52, 56, 59, 64],  # E major: E2 E3 G#3 B3 E4
+    ]
+    notes = []
+    for i, chord in enumerate(chords):
+        notes += [(note, i * 2 * bar, 2 * bar) for note in chord]
+    rolled_at = len(chords) * 2 * bar
+    final = [33, 45, 52, 57, 60, 64, 67, 69, 71, 72]  # A1 A2 E3 A3 C4 E4 G4 A4 B4 C5
+    end = rolled_at + 0.3 * len(final) + 4.0
+    notes += [(note, rolled_at + 0.3 * k, end - (rolled_at + 0.3 * k)) for k, note in enumerate(final)]
+    return notes
 
 
 # Live playing (phase 1b) ----------------------------------------------------
@@ -763,8 +1286,34 @@ def play_arpeggio():
     sd.wait()
 
 
+def play_demo():
+    """Render the phase 3 presets to WAV files, then play them: the bass line,
+    then the pad progression."""
+    import sounddevice as sd
+    import soundfile as sf
+
+    renders = []
+    for name, notes, patch in (("bass", bass_line(), BASS), ("pad", pad_progression(), PAD)):
+        print(f"Rendering the {name}...", flush=True)
+        started = time.perf_counter()
+        audio = render_poly(notes, patch)
+        peak = float(np.max(np.abs(audio)))
+        if peak > 0.0:
+            audio *= F32(0.8 / peak)  # same 0.8 peak as the arpeggio, for the same reason
+        path = Path(__file__).with_name(f"hardpan_{name}.wav")
+        sf.write(path, audio, SAMPLE_RATE, subtype="FLOAT")
+        print(f"  wrote {path.name}: {len(audio) / SAMPLE_RATE:.1f} s, rendered in {time.perf_counter() - started:.0f} s")
+        renders.append(audio)
+    for audio in renders:
+        sd.play(audio, SAMPLE_RATE)
+        sd.wait()
+
+
 if __name__ == "__main__":
-    if len(sys.argv) > 1 and sys.argv[1] == "live":
+    command = sys.argv[1] if len(sys.argv) > 1 else ""
+    if command == "live":
         run_live(int(sys.argv[2]) if len(sys.argv) > 2 else 256)
+    elif command == "demo":
+        play_demo()
     else:
         play_arpeggio()

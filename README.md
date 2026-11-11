@@ -67,7 +67,7 @@ uses for live MIDI input, has no Windows wheel for 3.13 yet.
 
 ```powershell
 & "$env:LOCALAPPDATA\Programs\Python\Python311\python.exe" -m venv .venv
-.venv\Scripts\python -m pip install numpy sounddevice soundfile mido python-rtmidi
+.venv\Scripts\python -m pip install numpy sounddevice soundfile mido python-rtmidi matplotlib
 .venv\Scripts\python hardpan_proto.py
 ```
 
@@ -79,3 +79,15 @@ MIDI keyboard. With none connected, it opens a small window that turns the
 computer keyboard into a piano (A S D F G H J K L ; ' for the white keys, W E
 T Y U O P for the black, from C4). An optional block size can follow `live`,
 for example `live 128`.
+
+`.venv\Scripts\python hardpan_proto.py demo` (phase 3) renders the two
+presets through the 8-voice filtered synth to `hardpan_bass.wav` (a 16th-note
+bassline) and `hardpan_pad.wav` (a slow chord progression), then plays them.
+Rendering takes a minute or two, because eight voices of per-sample Python are
+slower than real time.
+
+`.venv\Scripts\python compare_aliasing.py` (phase 2) compares naive and
+PolyBLEP saw and square oscillators. It writes `aliasing_comparison.png`
+(spectrograms of a 100 Hz to 8 kHz sweep, plus measured aliasing at eight
+pitches) and the two saw sweeps as `sweep_naive_saw.wav` and
+`sweep_polyblep_saw.wav`, so the aliasing can be heard as well as seen.

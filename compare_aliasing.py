@@ -115,9 +115,13 @@ def coherent_pitch(target):
     return cycles * SAMPLE_RATE / TONE_LENGTH, cycles
 
 
+AUDIBLE_BAND = 10000.0  # aliases below this land where the ear is far more sensitive
+
+
 def measure_tone(osc_class, target):
-    """(pitch, aliasing power relative to the note's power in dB, loudest single
-    alias relative to the fundamental in dB, that alias's frequency, spectrum)."""
+    """(pitch, all aliasing relative to the note's power in dB, aliasing below
+    AUDIBLE_BAND relative to the note's power in dB, loudest single alias
+    relative to the fundamental in dB, that alias's frequency, spectrum)."""
     f0, cycles = coherent_pitch(target)
     osc = osc_class()
     osc.set_frequency(f0)
@@ -127,14 +131,26 @@ def measure_tone(osc_class, target):
     is_note[0] = True  # DC belongs to the waveform (pulse widths other than 0.5 have it)
     is_note[cycles::cycles] = True  # the harmonics
     alias = np.where(is_note, 0.0, spectrum)
+    note_power = spectrum[is_note].sum()
+    below = np.arange(len(spectrum)) * SAMPLE_RATE / TONE_LENGTH < AUDIBLE_BAND
     worst = int(np.argmax(alias))
     return (
         f0,
-        10 * math.log10(alias.sum() / spectrum[is_note].sum()),
+        10 * math.log10(alias.sum() / note_power),
+        10 * math.log10(alias[below].sum() / note_power),
         10 * math.log10(alias[worst] / spectrum[cycles]),
         worst * SAMPLE_RATE / TONE_LENGTH,
         spectrum,
     )
+
+
+def spread_labels(ys, gap):
+    """Nudge label heights apart so no two are closer than `gap`, keeping order."""
+    order = sorted(range(len(ys)), key=lambda i: ys[i])
+    placed = list(ys)
+    for prev, cur in zip(order, order[1:]):
+        placed[cur] = max(placed[cur], placed[prev] + gap)
+    return placed
 
 
 def style_axes(ax):
@@ -148,7 +164,7 @@ def style_axes(ax):
 
 def main():
     plt.rcParams["font.family"] = ["Segoe UI", "DejaVu Sans"]
-    fig = plt.figure(figsize=(13, 12.5), facecolor=SURFACE)
+    fig = plt.figure(figsize=(13, 12), facecolor=SURFACE)
     grid = fig.add_gridspec(3, 3, width_ratios=[1, 1, 0.035], height_ratios=[1, 1, 0.9], hspace=0.42, wspace=0.12)
     fig.suptitle("Aliasing: naive versus PolyBLEP oscillators", x=0.07, ha="left", fontsize=16, color=INK, y=0.975)
     fig.text(
@@ -181,10 +197,14 @@ def main():
             if row == 1:
                 ax.set_xlabel("Fundamental of the sweep (Hz)", color=INK_2, fontsize=10)
             if row == 0 and col == 0:
+                # The 6th harmonic passes 24 kHz when the note reaches 4 kHz and folds
+                # back: at 5 kHz it is heard at 48 - 6 x 5 = 18 kHz, and falling.
                 ax.annotate(
-                    "aliases: falling\nwhile the note rises",
-                    xy=(sweep_time(2600), 14.5), xytext=(sweep_time(330), 19.0),
-                    fontsize=9.5, color=INK, arrowprops=dict(arrowstyle="-", color=INK_2, lw=0.8),
+                    "6th harmonic, folded back:\nfalls while the note rises",
+                    xy=(sweep_time(5000), 18.0), xytext=(sweep_time(260), 20.2),
+                    fontsize=9.5, color=INK, va="center",
+                    bbox=dict(boxstyle="round,pad=0.35", fc=SURFACE, ec=AXIS, lw=0.6),
+                    arrowprops=dict(arrowstyle="-", color=INK, lw=0.9),
                 )
     bar = fig.colorbar(image, cax=fig.add_subplot(grid[0:2, 2]))
     bar.set_label("Level relative to the loudest point (dB)", color=INK_2, fontsize=10)
@@ -197,24 +217,30 @@ def main():
         for label, cls in (("naive", naive_class), ("PolyBLEP", blep_class)):
             results[name, label] = [measure_tone(cls, f) for f in TONE_TARGETS]
 
-    y_low = math.floor(min(r[1] for rows in results.values() for r in rows) / 10) * 10 - 5
+    y_low = math.floor(min(r[2] for rows in results.values() for r in rows) / 10) * 10 - 5
     for col, (name, _, _) in enumerate(WAVEFORMS):
         ax = fig.add_subplot(grid[2, col])
         style_axes(ax)
         ax.grid(True, which="major", color=GRID, linewidth=0.8)
         ax.set_axisbelow(True)
+        ends, texts = [], []
         for label, color in (("PolyBLEP", POLYBLEP_COLOR), ("naive", NAIVE_COLOR)):
             rows = results[name, label]
-            pitches, totals = [r[0] for r in rows], [r[1] for r in rows]
-            ax.plot(pitches, totals, color=color, linewidth=2, marker="o", markersize=6,
-                    markeredgecolor=SURFACE, markeredgewidth=1.5, label=label)
-            ax.annotate(label, xy=(pitches[-1], totals[-1]), xytext=(8, 0), textcoords="offset points",
-                        va="center", fontsize=10, color=INK)
+            pitches = [r[0] for r in rows]
+            for index, band, style in ((1, "all", "-"), (2, "<10 kHz", "--")):
+                values = [r[index] for r in rows]
+                ax.plot(pitches, values, color=color, linewidth=2, linestyle=style, marker="o", markersize=6,
+                        markeredgecolor=SURFACE, markeredgewidth=1.5, label=f"{label}, {band}")
+                ends.append(values[-1])
+                texts.append(f"{label}, {band}")
+        for text, y in zip(texts, spread_labels(ends, gap=5.5)):
+            ax.annotate(text, xy=(pitches[-1], y), xytext=(8, 0), textcoords="offset points",
+                        va="center", fontsize=9.5, color=INK)
         ax.set_xscale("log")
         ax.set_xticks([55, 110, 220, 440, 880, 1760, 3520, 7040])
         ax.set_xticklabels(["55", "110", "220", "440", "880", "1.8k", "3.5k", "7k"])
         ax.minorticks_off()
-        ax.set_xlim(45, 14000)
+        ax.set_xlim(45, 40000)
         ax.set_ylim(y_low, 0)
         ax.set_title(f"{name}: aliasing left in a steady tone", loc="left", fontsize=12, color=INK)
         ax.set_xlabel("Pitch (Hz)", color=INK_2, fontsize=10)
@@ -222,34 +248,37 @@ def main():
             ax.set_ylabel("Alias power relative to the note (dB)", color=INK_2, fontsize=10)
         else:
             ax.set_yticklabels([])
-        ax.legend(loc="lower right", frameon=False, fontsize=9.5, labelcolor=INK_2)
+        handles, labels = ax.get_legend_handles_labels()
+    # Both panels show the same four series, so one legend serves the pair.
+    fig.legend(handles, labels, loc="lower center", bbox_to_anchor=(0.46, 0.025), frameon=False, fontsize=9.5,
+               labelcolor=INK_2, ncol=4, handlelength=2.6, columnspacing=1.6)
 
     out = HERE / "aliasing_comparison.png"
     fig.savefig(out, dpi=110, facecolor=SURFACE)
     print(f"Wrote {out.name}, sweep_naive_saw.wav, sweep_polyblep_saw.wav\n")
 
-    print("Steady tones. 'total' is all the aliasing as a share of the note's power;")
-    print("'loudest' is the single strongest alias relative to the fundamental.\n")
+    print("Steady tones: aliasing as a share of the note's power, all of it and the part")
+    print("that lands below 10 kHz, where the ear is far more sensitive.\n")
     for name, _, _ in WAVEFORMS:
-        print(f"{name:10s}       naive total  loudest      PolyBLEP total  loudest     improvement")
+        print(f"{name:10s}      naive: all   <10 kHz    PolyBLEP: all   <10 kHz    improvement: all  <10 kHz")
         for naive, blep in zip(results[name, "naive"], results[name, "PolyBLEP"]):
             print(
-                f"  {naive[0]:7.1f} Hz     {naive[1]:7.1f} dB {naive[2]:7.1f} dB        {blep[1]:7.1f} dB {blep[2]:7.1f} dB"
-                f"     {naive[1] - blep[1]:5.1f} dB"
+                f"  {naive[0]:7.1f} Hz     {naive[1]:7.1f}   {naive[2]:7.1f} dB      {blep[1]:7.1f}   {blep[2]:7.1f} dB"
+                f"          {naive[1] - blep[1]:5.1f}   {naive[2] - blep[2]:5.1f} dB"
             )
         print()
 
     worst = max(((name, row) for name, _, _ in WAVEFORMS for row in results[name, "PolyBLEP"]), key=lambda nr: nr[1][1])
-    name, (f0, total, loudest, at, _) = worst
+    name, (f0, total, below, loudest, at, _) = worst
     print(
-        f"Worst case for PolyBLEP: {name.lower()} at {f0:.0f} Hz. Aliasing totals {total:.1f} dB, "
-        f"and the loudest alias is {loudest:.1f} dB, at {at:.0f} Hz."
+        f"Worst case for PolyBLEP: {name.lower()} at {f0:.0f} Hz. Aliasing totals {total:.1f} dB "
+        f"({below:.1f} dB below 10 kHz), and the loudest alias is {loudest:.1f} dB, at {at:.0f} Hz."
     )
 
     # What PolyBLEP costs: it softens the top harmonics a little. An ideal saw's
     # nth harmonic is 1/n of the fundamental.
     f0, cycles = coherent_pitch(440.0)
-    spectrum = results["Sawtooth", "PolyBLEP"][3][4]
+    spectrum = results["Sawtooth", "PolyBLEP"][3][5]
     losses = []
     for f in (5000, 10000, 15000, 20000):
         n = round(f / f0)
