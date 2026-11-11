@@ -1,4 +1,4 @@
-"""HARDPAN phases 1 and 1b: a monophonic sine synth, rendered offline or played live.
+"""HARDPAN phases 1, 1b and 2: a monophonic synth, rendered offline or played live.
 
 One sine oscillator and one ADSR envelope, computed one sample at a time in
 float32 at 48 kHz. All of the synthesis math is written out in this file.
@@ -10,6 +10,8 @@ sound card, and mido reads MIDI.
     python hardpan_proto.py live       play live from a MIDI keyboard, or from
                                        the computer keyboard if none is connected
     python hardpan_proto.py live 128   the same, with 128-frame audio blocks
+    python compare_aliasing.py         phase 2: naive versus PolyBLEP saw and
+                                       square, as spectrograms and measurements
 
 Intentionally not implemented yet:
 - Polyphony. There is one voice. A note that starts while another is held takes
@@ -23,8 +25,9 @@ Intentionally not implemented yet:
 - Choosing an audio device or MIDI port by hand. Live mode takes ASIO if a
   driver is installed, then WASAPI, then the Windows default, and opens every
   MIDI input present at startup.
-- Any waveform other than sine. A sine has no harmonics above its fundamental,
-  so it cannot alias, and anti-aliasing waits for saw and square (phase 2).
+- Any waveform other than sine in the voice. Phase 2 adds sawtooth and square
+  oscillators, naive and PolyBLEP, for compare_aliasing.py to measure. The
+  voice starts using them in phase 3, when there is a filter to tame them.
 - Filters (phase 3).
 - Smoothing for parameters changed while a note sounds. Parameters stay fixed
   for the length of a render.
@@ -53,8 +56,10 @@ def midi_to_hz(note):
     return F32(440.0 * 2.0 ** ((note - 69) / 12.0))
 
 
-class SineOscillator:
-    """Produces one sample per tick, so the frequency can change on any sample."""
+class PhaseOscillator:
+    """The phase accumulator every oscillator here is built on. It produces one
+    sample per tick, so the frequency can change on any sample. Each subclass
+    turns the phase into a waveform in tick()."""
 
     def __init__(self, sample_rate=SAMPLE_RATE):
         self.sample_rate = F32(sample_rate)
@@ -75,10 +80,7 @@ class SineOscillator:
     def reset(self):
         self.phase = F32(0.0)
 
-    def tick(self):
-        # Output before advancing, so a note that starts at phase 0 really
-        # starts at sin(0) = 0.
-        out = np.sin(TWO_PI * self.phase)
+    def advance(self):
         self.phase += self.increment
         # Why wrap: a sine repeats every cycle, so phase 3.25 and phase 0.25 give
         # the same output. They are not equally precise, though. float32 keeps
@@ -97,6 +99,153 @@ class SineOscillator:
             # always enough, because the step is under one cycle for any pitch
             # below the sample rate.
             self.phase -= F32(1.0)
+
+
+class SineOscillator(PhaseOscillator):
+    def tick(self):
+        # Output before advancing, so a note that starts at phase 0 really
+        # starts at sin(0) = 0.
+        out = np.sin(TWO_PI * self.phase)
+        self.advance()
+        return out
+
+
+class NaiveSaw(PhaseOscillator):
+    """A sawtooth read straight off the phase. Kept for comparison: it aliases.
+
+    An ideal sawtooth has a harmonic at every multiple of its frequency, each
+    weaker only in proportion (the nth is 1/n as strong), with no end. Samples
+    at 48 kHz can only represent frequencies below half that, 24 kHz, the
+    Nyquist frequency. Harmonics above it do not disappear. They fold back
+    down, mirrored at 24 kHz: a harmonic at 24 kHz + x is heard at 24 kHz - x.
+    Those folded harmonics are not multiples of the note, so they sound like
+    faint inharmonic whistles, and when the pitch rises, they fall.
+    """
+
+    def tick(self):
+        # Over one cycle the phase climbs from 0 to 1 and drops back, which is
+        # already a sawtooth. Doubling and subtracting 1 just centres it on zero,
+        # running from -1 to +1. The drop at the wrap is what aliases.
+        out = 2.0 * self.phase - 1.0
+        self.advance()
+        return out
+
+
+class NaiveSquare(PhaseOscillator):
+    """A pulse wave read straight off the phase. Kept for comparison: it aliases.
+
+    width is the fraction of each cycle spent high. 0.5 gives a square, which
+    has only odd harmonics and sounds hollow. Narrower pulses sound thinner and
+    more nasal, and slowly sweeping the width (pulse-width modulation) is a
+    signature 80s string and pad sound. Any width other than 0.5 also adds a
+    constant offset (DC) of 2 * width - 1, which is inaudible but uses headroom.
+    """
+
+    def __init__(self, sample_rate=SAMPLE_RATE, width=0.5):
+        super().__init__(sample_rate)
+        self.width = F32(width)
+
+    def tick(self):
+        out = F32(1.0) if self.phase < self.width else F32(-1.0)
+        self.advance()
+        return out
+
+
+# What a BLEP is.
+#
+# Any waveform with jumps in it can be split into a smooth part plus a set of
+# instant steps. A saw is a smooth ramp plus one downward step per cycle; a
+# square is two steps per cycle and nothing else. The smooth part is harmless.
+# The steps are the whole aliasing problem: an instant jump contains energy at
+# every frequency, and everything above 24 kHz folds back into the audible
+# range.
+#
+# A BLEP (band-limited step) is what a step looks like after an ideal low-pass
+# filter at the Nyquist frequency has removed everything that cannot be
+# sampled. Mathematically, it is the integral of a sinc function. It rises
+# through the jump over a few samples, rings a little on either side, and
+# contains nothing that can alias. Replace every naive step with a BLEP and
+# the waveform stops aliasing.
+#
+# The replacement is done by adding a correction: the BLEP minus the naive
+# step. The two agree everywhere except right around the jump, where the BLEP
+# is smeared out and the naive step is not. So the correction is near zero
+# away from a jump and large only beside it, which means it only has to be
+# computed near jumps. Everywhere else the naive waveform is already right.
+# That is why the method is cheap.
+#
+# Why only within one sample of the jump: the exact correction rings on for
+# many samples, shrinking slowly. PolyBLEP approximates it with two short
+# polynomial pieces, one on each side of the jump, covering exactly one sample
+# each. They come from replacing the ideal sinc with a triangle two samples
+# wide and integrating. That is a crude low-pass, which is why PolyBLEP reduces
+# aliasing a great deal but does not remove it, and why it slightly softens
+# the highest harmonics too. Wider corrections (tabulated BLEPs, minBLEPs) do
+# better and cost more.
+#
+# The other half of the trick is timing. A jump happens at an exact instant,
+# which almost never falls on a sample. The naive waveform can only jump on a
+# sample, so it rounds every jump to the sample grid, and that rounding error,
+# a little different every cycle, is the aliasing seen in time rather than in
+# frequency. t / dt below measures where inside the sample interval the jump
+# really happened, so the correction places the step where it belongs.
+
+
+def poly_blep(t, dt):
+    """Correction for an upward jump of 2 at phase 0, sampled at phase t, where
+    dt is the phase step per sample. Every jump in these waveforms is 2 high
+    (from -1 to +1 or back), so it is scaled for that. Only valid while dt < 0.5,
+    so that the region after a jump does not run into the region before the
+    same jump one cycle later: true for any pitch below 24 kHz."""
+    if t < dt:
+        # Just after the jump. x runs from 0 to 1 across the sample interval
+        # after it.
+        x = t / dt
+        return x + x - x * x - 1.0
+    if t > 1.0 - dt:
+        # Just before the next jump. x runs from -1 to 0 across the interval
+        # before it.
+        x = (t - 1.0) / dt
+        return x * x + x + x + 1.0
+    return F32(0.0)
+
+
+class PolyBlepSaw(PhaseOscillator):
+    """A sawtooth with each drop replaced by a PolyBLEP. See the BLEP note above."""
+
+    def tick(self):
+        t = self.phase
+        # The saw drops by 2 at the wrap: a downward jump, so the correction is
+        # subtracted. Right at the jump, naive and correction cancel to 0, the
+        # midpoint of the drop.
+        out = 2.0 * t - 1.0 - poly_blep(t, self.increment)
+        self.advance()
+        return out
+
+
+class PolyBlepSquare(PhaseOscillator):
+    """A pulse wave with both of its jumps replaced by PolyBLEPs.
+
+    width as in NaiveSquare. Each correction reaches one sample either side of
+    its jump, so the two stay separate only while two steps per sample fit
+    inside both the high and the low part of the cycle. For a square that holds
+    below 12 kHz; very narrow pulses run into each other at lower pitches.
+    """
+
+    def __init__(self, sample_rate=SAMPLE_RATE, width=0.5):
+        super().__init__(sample_rate)
+        self.width = F32(width)
+
+    def tick(self):
+        t, dt, width = self.phase, self.increment, self.width
+        out = F32(1.0) if t < width else F32(-1.0)
+        # Two jumps per cycle: up by 2 at phase 0, down by 2 at phase `width`.
+        # The downward one gets the same correction, measured from where that
+        # jump sits in the cycle, and subtracted.
+        out = out + poly_blep(t, dt)
+        since_drop = t - width if t >= width else t - width + 1.0
+        out = out - poly_blep(since_drop, dt)
+        self.advance()
         return out
 
 

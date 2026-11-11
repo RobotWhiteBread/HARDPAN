@@ -12,6 +12,21 @@ avoids clicks.
 Named for the compacted soil layer under the topsoil. Hard, flat, and the
 thing everything else sits on.
 
+## Sound target
+Dark and hard-driving, with an 80s edge. On one side, the eerie, ominous
+score Nick Cave and Warren Ellis wrote for *Dahmer*; on the other, the
+pulsing sequenced basslines of John Carpenter's scores and 80s-inspired
+darksynth. In synth terms:
+- Sawtooth oscillators detuned a few cents apart, with a square
+  sub-oscillator an octave down
+- A resonant low-pass filter kept mostly closed, snapped open on every note
+  by a fast filter envelope
+- 16th-note sequences in minor keys, around 100 to 120 BPM
+- Drive into the filter for grit
+- Chorus, a dark tempo-synced delay, and a long reverb
+
+`BUILD_PROMPT.md` phases 2, 3 and 3b build these, in that order.
+
 ## Stack
 Rust with `nih-plug`, or Python with `numpy` plus `sounddevice` for
 prototyping. The Rust DSP lives in one `no_std` crate, so the same code runs in

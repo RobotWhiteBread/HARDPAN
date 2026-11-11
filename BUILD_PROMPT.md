@@ -116,7 +116,9 @@ Add to the prototype:
 
 1. A biquad filter class implementing a resonant low-pass, with coefficients
    derived from the standard audio EQ cookbook formulas. Implement the
-   coefficient math explicitly; do not call scipy.signal.butter.
+   coefficient math explicitly; do not call scipy.signal.butter. Also offer a
+   24 dB/octave mode built from two biquads in series, and tell me what
+   cascading does to the resonance.
 2. Denormal protection in the filter state, and a comment explaining what
    denormals are and why they matter in a real-time context.
 3. A voice allocator supporting 8 simultaneous voices. A new note takes a free
@@ -129,14 +131,56 @@ Add to the prototype:
    new note's timing.
 4. A second ADSR routed to the filter cutoff, so the filter envelope is
    independent of the amplitude envelope.
-5. One preset that actually sounds good, not just one that exercises the
-   features: choose the oscillator, both envelopes, cutoff, and resonance, and
-   tell me why each value.
+5. Let each voice mix up to three oscillators, so a patch can stack two saws
+   detuned a few cents apart with a square sub-oscillator an octave down.
+   Explain why a few cents of detune sounds thicker, and what sets the rate
+   of the beating.
+6. Two presets that actually sound good, not just ones that exercise the
+   features, aimed at the README's sound target. Tell me why each value.
+   - A bass: the detuned saws plus the sub, the low-pass mostly closed, and a
+     filter envelope with an instant attack and a short decay, so every note
+     snaps.
+   - A pad: slow attack, long release, the filter darker still.
 
-Then render a short polyphonic chord progression with that preset, including
-a passage with more than 8 overlapping notes so the stealing is audible, and
-tell me which parameter values make the filter self-oscillate so I know where
-the resonance limit is.
+Then render two things: the bass playing a 16th-note sequence in a minor key
+at about 110 BPM, and the pad playing a slow minor chord progression that
+includes a passage with more than 8 overlapping notes, so the stealing is
+audible. Tell me which parameter values make the filter self-oscillate so I
+know where the resonance limit is.
+```
+
+---
+
+## Phase 3b: the 80s toolkit
+
+Everything that turns the phase 3 voices into the README's sound target. It
+is still Python and still rendered offline: this much per-sample Python will
+not keep up in real time, which is what phase 4 is for.
+
+```
+Add to the prototype, with all the DSP written by hand:
+
+1. Drive: a tanh waveshaper with an input gain, between the oscillators and
+   the filter. A nonlinearity creates new harmonics, and those alias like any
+   others, so run it oversampled (2x or 4x) with a half-band filter you design
+   yourself. Show me its aliasing with and without oversampling, the same way
+   phase 2 compared the oscillators.
+2. Glide for the mono bass. The pitch slides exponentially (equal time per
+   semitone), not linearly in Hz, with the time in milliseconds. Explain why.
+3. A step sequencer: tempo in BPM, 16th-note steps, a note, gate length, and
+   accent per step, plus swing. Accent should hit both the amplitude and the
+   filter envelope, the way it did on 80s sequenced bass.
+4. A chorus in the style of the Juno: two delay lines swept by slow LFOs in
+   opposite phase. Explain why the delay's read position has to be
+   interpolated between samples.
+5. A tempo-synced delay with feedback, a low-pass inside the feedback loop so
+   the repeats get darker, and a limiter so the feedback cannot run away.
+6. A reverb from Schroeder or Moorer style combs and all-passes, with damping
+   in the combs for a dark tail. Explain why the comb delay lengths are
+   chosen to share no common factors.
+
+Then render a 30-second demo in a minor key at about 110 BPM: the sequenced
+bass, the pad, and a mono lead with glide, all through the effects.
 ```
 
 ---
@@ -152,7 +196,8 @@ repository activity.
 
 Once I choose, scaffold a Rust plugin from the appropriate template that
 ports exactly what my Python prototype does: sine, PolyBLEP saw, PolyBLEP
-square, amplitude ADSR, filter ADSR, resonant biquad, 8-voice polyphony.
+square, amplitude ADSR, filter ADSR, resonant biquad, 8-voice polyphony, and
+the phase 3b drive, glide, sequencer, chorus, delay, and reverb.
 
 Constraints that matter more than features:
 - No allocation in the process callback. None. Preallocate all voice state.
