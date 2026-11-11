@@ -86,6 +86,14 @@ bassline) and `hardpan_pad.wav` (a slow chord progression), then plays them.
 Rendering takes a minute or two, because eight voices of per-sample Python are
 slower than real time.
 
+`.venv\Scripts\python hardpan_proto.py track` (phase 3b) renders a 30-second
+stereo track to `hardpan_track.wav` and plays it: a sequenced bass with drive,
+accents and glides, the pad, and a gliding lead, through chorus, delay and
+reverb. Rendering takes about two minutes.
+
+`.venv\Scripts\python compare_drive.py` (phase 3b) measures the drive's
+aliasing at 1x, 2x and 4x oversampling and writes `drive_comparison.png`.
+
 `.venv\Scripts\python compare_aliasing.py` (phase 2) compares naive and
 PolyBLEP saw and square oscillators. It writes `aliasing_comparison.png`
 (spectrograms of a 100 Hz to 8 kHz sweep, plus measured aliasing at eight

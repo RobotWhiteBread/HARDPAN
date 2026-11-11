@@ -1,9 +1,10 @@
-"""HARDPAN phases 1 to 3: a synth built from first principles.
+"""HARDPAN phases 1 to 3b: a synth built from first principles.
 
-Oscillators, envelopes, a resonant filter, and an 8-voice allocator, computed
-one sample at a time in float32 at 48 kHz. All of the synthesis math is
-written out in this file. numpy holds the samples, soundfile writes the WAV,
-sounddevice talks to the sound card, and mido reads MIDI.
+Oscillators, envelopes, an oversampled drive, a resonant filter, an 8-voice
+allocator and a gliding mono voice, a step sequencer, and chorus, delay and
+reverb, computed one sample at a time in float32 at 48 kHz. All of the
+synthesis math is written out in this file. numpy holds the samples, soundfile
+writes the WAV, sounddevice talks to the sound card, and mido reads MIDI.
 
     python hardpan_proto.py            render a C major arpeggio to
                                        hardpan_proto.wav and play it (phase 1)
@@ -16,6 +17,10 @@ sounddevice talks to the sound card, and mido reads MIDI.
     python hardpan_proto.py demo       render the bass and pad presets to
                                        hardpan_bass.wav and hardpan_pad.wav and
                                        play them (phase 3)
+    python hardpan_proto.py track      render a 30-second track in stereo to
+                                       hardpan_track.wav and play it (phase 3b)
+    python compare_drive.py            the drive with and without oversampling,
+                                       as spectrograms and measurements (phase 3b)
 
 Intentionally not implemented yet:
 - Polyphony and the presets in live mode. Live mode still plays the phase 1
@@ -24,7 +29,8 @@ Intentionally not implemented yet:
 - Self-oscillation. The cookbook biquad is linear and stays stable at any
   resonance it allows, so it rings and peaks but never sustains a tone on its
   own. That needs a nonlinear filter with feedback, like a Moog ladder.
-- Velocity (MIDI velocity is read and ignored), pitch bend, glide, sustain pedal.
+- Velocity (MIDI velocity is read and ignored), pitch bend, sustain pedal. Glide
+  and accent exist for rendered mono patches, not in live mode.
 - Sample-accurate timing for live notes. A live note starts at the beginning of
   the next audio callback, so it can be late by up to the time between
   callbacks (see LiveEngine._callback). The offline render is sample accurate
@@ -446,19 +452,22 @@ class MonoVoice:
 
 
 def note_events(notes):
-    """(sample, kind, note) events from (note_number, start_time, duration) tuples,
-    in time order. kind is 1 for note-on, 0 for note-off."""
+    """(sample, kind, note, accent) events from (note_number, start_time, duration)
+    tuples, in time order. kind is 1 for note-on, 0 for note-off. A tuple may
+    carry a fourth item, True for an accented note."""
     # Sample-accurate means each note-on and note-off happens on its own sample,
     # the nearest one to its time, rather than at the start of some block.
     # Note-offs sort before note-ons on the same sample (0 before 1). That way a
     # note repeated back to back is released and then retriggered. In the other
     # order, the new note would be released on the very sample it started.
     events = []
-    for note, start, duration in notes:
+    for item in notes:
+        note, start, duration = item[:3]
+        accent = bool(item[3]) if len(item) > 3 else False
         on = round(start * SAMPLE_RATE)
         off = max(round((start + duration) * SAMPLE_RATE), on + 1)  # a note always lasts at least a sample
-        events.append((on, 1, note))
-        events.append((off, 0, note))
+        events.append((on, 1, note, accent))
+        events.append((off, 0, note, False))
     events.sort()
     return events
 
@@ -475,7 +484,7 @@ def render(notes, attack=0.010, decay=0.150, sustain=0.7, release=0.300):
     i = 0
     while i < len(events) or voice.active:
         while i < len(events) and events[i][0] == n:
-            _, kind, note = events[i]
+            _, kind, note, _ = events[i]
             voice.note_on(note) if kind else voice.note_off(note)
             i += 1
         out.append(voice.tick())
@@ -670,6 +679,13 @@ class Patch:
     filter_env: tuple  # attack, decay, sustain, release
     amp: tuple  # attack, decay, sustain, release
     gain: float = 1.0
+    # Phase 3b
+    drive: float = 0.0  # gain into the tanh saturator between oscillators and filter; 0 bypasses it
+    oversample: int = 2  # 1, 2 or 4: the rate the saturator runs at, as a multiple of 48 kHz (see Drive)
+    mono: bool = False  # one voice, last-note priority, overlapping notes glide (MonoSynth)
+    glide: float = 0.0  # seconds a legato glide takes, whatever the interval
+    accent_gain: float = 1.0  # loudness of an accented note, as a multiple
+    accent_env: float = 0.0  # extra octaves of filter sweep on an accented note
 
 
 # How long a stolen voice takes to fade out before its new note starts. 5 ms
@@ -684,10 +700,203 @@ STEAL_FADE = np.array(
 )
 
 
+# Drive (phase 3b) -----------------------------------------------------------
+
+
+def bessel_i0(x):
+    """The modified Bessel function I0, summed from its power series. The Kaiser
+    window below is built from it."""
+    total = term = 1.0
+    k = 1
+    while term > 1e-12 * total:
+        term *= (x / (2.0 * k)) ** 2
+        total += term
+        k += 1
+    return total
+
+
+def halfband_taps(length, stopband_db=80.0):
+    """A half-band low-pass FIR filter, designed by windowing the ideal one.
+
+    A half-band filter's cutoff is exactly a quarter of its sample rate: half way
+    to Nyquist. That is where oversampling by two needs it, because at the
+    doubled rate the original audio sits in the lower half of the spectrum and
+    everything to be removed sits in the upper half.
+
+    The ideal low-pass with that cutoff has the impulse response 0.5 * sinc(n/2),
+    which goes on forever. Chopping it off abruptly makes the frequency response
+    ripple, so it is tapered with a Kaiser window. The window's one parameter,
+    beta, trades how sharply the filter goes from passing to stopping against how
+    deeply it stops; Kaiser's own formula gives beta for a wanted stopband depth.
+    The length then sets how sharp the transition is.
+
+    Half-band filters also come with a discount. sinc(n/2) is zero at every even
+    n except the centre, so every other tap is exactly zero, and the centre tap
+    is exactly 0.5. The resamplers below use both facts to skip half the work.
+    """
+    if length % 4 != 3:
+        raise ValueError("these half-band filters have 4k + 3 taps, so the centre tap is odd")
+    beta = 0.1102 * (stopband_db - 8.7)  # Kaiser's formula, for stopbands deeper than 50 dB
+    centre = (length - 1) // 2
+    taps = np.zeros(length)
+    for i in range(length):
+        n = i - centre
+        if n == 0:
+            ideal = 0.5
+        elif n % 2 == 0:
+            ideal = 0.0
+        else:
+            ideal = math.sin(math.pi * n / 2) / (math.pi * n)
+        r = 2.0 * i / (length - 1) - 1.0  # -1 to 1 across the filter
+        taps[i] = ideal * bessel_i0(beta * math.sqrt(1.0 - r * r)) / bessel_i0(beta)
+    return taps.astype(F32)
+
+
+# The inner stage converts between 48 and 96 kHz and has to be sharp: it must
+# keep everything up to about 19 kHz and remove everything above about 29 kHz.
+# The outer stage, between 96 and 192 kHz, has room to spare (keep up to 26 kHz,
+# remove from 70 kHz), so a much shorter filter does.
+HALFBAND_INNER = halfband_taps(51)
+HALFBAND_OUTER = halfband_taps(23)
+
+
+class HalfbandUpsampler:
+    """Doubles the sample rate: one sample in, two out.
+
+    Doubling the rate means putting a zero between every pair of samples. That
+    keeps the original spectrum and adds a mirror image of it above the old
+    Nyquist frequency, which the half-band filter removes. (The zeros also halve
+    the level, so the filter is doubled.) Since the inserted samples are zero and
+    half of the filter's taps are zero, each output only ever needs half the
+    filter. One output of each pair is a short filter over the inputs. The other
+    meets only the centre tap, 0.5, times the doubling: a plain delayed copy of
+    an input.
+    """
+
+    def __init__(self, taps):
+        centre = (len(taps) - 1) // 2
+        self.taps = (2.0 * taps[0::2]).astype(F32)  # the taps that are not zero, doubled
+        self.copy_at = (centre - 1) // 2
+        self.size = len(self.taps)
+        self.history = np.zeros(2 * self.size, dtype=F32)
+        self.pos = 0
+
+    def reset(self):
+        self.history[:] = 0.0
+
+    def push(self, x):
+        # Each sample is stored twice, size apart, so the newest `size` samples are
+        # always one contiguous slice, newest first, with no wrapping to handle.
+        self.pos = (self.pos - 1) % self.size
+        self.history[self.pos] = self.history[self.pos + self.size] = x
+        recent = self.history[self.pos : self.pos + self.size]
+        return np.dot(self.taps, recent), recent[self.copy_at]
+
+
+class HalfbandDownsampler:
+    """Halves the sample rate: two samples in, one out. It low-passes first, so
+    nothing above the new Nyquist frequency is left to fold back down, then keeps
+    every other sample. Only the samples that are kept get computed."""
+
+    def __init__(self, taps):
+        self.taps = taps  # symmetric, so it needs no reversing for convolution
+        self.size = len(taps)
+        self.history = np.zeros(2 * self.size, dtype=F32)
+        self.pos = 0
+
+    def reset(self):
+        self.history[:] = 0.0
+
+    def _store(self, x):
+        self.pos = (self.pos - 1) % self.size
+        self.history[self.pos] = self.history[self.pos + self.size] = x
+
+    def push(self, a, b):
+        self._store(a)
+        self._store(b)
+        return np.dot(self.taps, self.history[self.pos : self.pos + self.size])
+
+
+class Drive:
+    """Saturation: tanh(gain * x), run at 1, 2 or 4 times the sample rate.
+
+    Why tanh: it is nearly a straight line for quiet signals and bends smoothly
+    toward +1 and -1 for loud ones, much as an overdriven transistor or valve
+    stage does. Because it is symmetric, the harmonics it adds are odd ones. The
+    output is divided by tanh(gain), so a full-scale input still peaks at full
+    scale and turning up the drive adds grit rather than mostly adding level.
+
+    Why oversample: bending a waveform adds harmonics, at multiples of what is
+    already there, and those land above the Nyquist frequency just as easily as
+    a naive saw's do, where they fold back down as aliases. Running the bend at
+    four times the sample rate puts those harmonics below a Nyquist of 96 kHz
+    instead. The filter on the way back down then removes everything above the
+    audio band before it can fold. compare_drive.py measures the difference.
+
+    Why the patches here use 2x: on a sine, which brings no high harmonics of
+    its own, 4x keeps clearly cleaner than 2x once the note is above about
+    1.5 kHz. But on a saw, as in these patches, 2x already removes about 13 dB of
+    the drive's aliasing below 10 kHz and 4x removes no more. What remains comes
+    from the saw itself: the little aliasing PolyBLEP leaves just under 24 kHz
+    gets mixed down by the bend, and oversampling the drive cannot undo aliasing
+    already in its input. At 2.5 times less CPU, 2x is the right trade there.
+    """
+
+    def __init__(self, gain, oversample=4):
+        if oversample not in (1, 2, 4):
+            raise ValueError(f"oversample must be 1, 2 or 4, got {oversample}")
+        self.gain = float(gain)
+        self.norm = 1.0 / math.tanh(self.gain)
+        self.oversample = oversample
+        self.up_inner = HalfbandUpsampler(HALFBAND_INNER)
+        self.down_inner = HalfbandDownsampler(HALFBAND_INNER)
+        self.up_outer = HalfbandUpsampler(HALFBAND_OUTER)
+        self.down_outer = HalfbandDownsampler(HALFBAND_OUTER)
+
+    def reset(self):
+        for stage in (self.up_inner, self.down_inner, self.up_outer, self.down_outer):
+            stage.reset()
+
+    def shape(self, x):
+        # Computed in double precision and rounded once, like the coefficients.
+        return F32(math.tanh(self.gain * float(x)) * self.norm)
+
+    def tick(self, x):
+        if self.oversample == 1:
+            return self.shape(x)
+        a, b = self.up_inner.push(x)
+        if self.oversample == 2:
+            return self.down_inner.push(self.shape(a), self.shape(b))
+        a1, a2 = self.up_outer.push(a)
+        b1, b2 = self.up_outer.push(b)
+        return self.down_inner.push(
+            self.down_outer.push(self.shape(a1), self.shape(a2)),
+            self.down_outer.push(self.shape(b1), self.shape(b2)),
+        )
+
+
+# Voices ---------------------------------------------------------------------
+
+# The filter's coefficients are recomputed every CONTROL_INTERVAL samples rather
+# than every sample. New coefficients cost a sine, a cosine and several divisions
+# per section, which was most of a voice's time when done every sample. The
+# envelopes still run every sample; only their effect on the filter is sampled,
+# at 6 kHz. Cutoff steps that small and that frequent are far below what the ear
+# can pick out as zipper noise. Hardware synths have long run their modulation
+# at a control rate like this for the same reason.
+CONTROL_INTERVAL = 8
+
+# Accent changes a voice's loudness and filter sweep, possibly while it is already
+# sounding (a legato note, or a retrigger during a release), so it is glided in
+# rather than switched: a jump in gain is a click. 3 ms is short enough to land
+# as part of the note's attack.
+ACCENT_SMOOTHING = 1.0 - math.exp(-1.0 / (0.003 * SAMPLE_RATE))
+
+
 class PolyVoice:
-    """Up to three oscillators, mixed, through a low-pass filter, then an amplitude
-    envelope: the classic oscillator, filter, amplifier chain. A second envelope
-    moves the filter cutoff."""
+    """Up to three oscillators, mixed, through an optional drive and a low-pass
+    filter, then an amplitude envelope: the classic oscillator, filter, amplifier
+    chain. A second envelope moves the filter cutoff."""
 
     def __init__(self, patch, sample_rate=SAMPLE_RATE):
         if not 1 <= len(patch.oscillators) <= 3:
@@ -703,7 +912,11 @@ class PolyVoice:
                 osc = SineOscillator(sample_rate)
             else:
                 raise ValueError(f"unknown wave {spec.wave!r}")
-            self.oscillators.append((osc, spec, F32(spec.level)))
+            # Octaves double the frequency. Cents are hundredths of a semitone,
+            # 1200 to the octave, so +4 cents multiplies it by 2**(4/1200), 1.0023.
+            ratio = 2.0 ** (spec.octave + spec.cents / 1200.0)
+            self.oscillators.append((osc, F32(spec.level), ratio))
+        self.drive = Drive(patch.drive, patch.oversample) if patch.drive > 0 else None
         self.amp_env = ADSR(*patch.amp, sample_rate=sample_rate)
         self.filter_env = ADSR(*patch.filter_env, sample_rate=sample_rate)
         self.filter = LowPassFilter(patch.slope, sample_rate)
@@ -713,39 +926,76 @@ class PolyVoice:
         self.released_at = 0
         self.fade = -1  # position in STEAL_FADE while being stolen, otherwise -1
         self.pending = None  # the note to start once the fade is done
+        self.pending_accent = False
         self.pending_since = 0  # when that note was played
         self.pending_held_for = 0  # if its key was let go during the fade, for how long it was held
         self.release_in = 0  # samples until a delayed release, 0 for none
+        self.pitch = 60.0  # in semitones (MIDI note numbers), fractional while gliding
+        self.glide_target = 60.0
+        self.glide_step = 0.0
+        self.glide_left = 0
+        self.accent = 0.0  # 0 to 1, glided toward accent_target
+        self.accent_target = 0.0
+        self.control = 0  # samples until the filter is next updated
         self.key_cutoff = patch.cutoff
 
     @property
     def free(self):
         return self.fade < 0 and not self.amp_env.active
 
-    def start(self, note, now):
+    def _set_pitch(self, pitch):
+        hz = 440.0 * 2.0 ** ((pitch - 69.0) / 12.0)
+        for osc, _, ratio in self.oscillators:
+            osc.set_frequency(hz * ratio)
+        # Key tracking: the cutoff follows the note by `keytrack` octaves per octave,
+        # measured from middle C, so a high note is not muffled relative to its own
+        # harmonics while a low one is wide open.
+        self.key_cutoff = self.patch.cutoff * 2.0 ** (self.patch.keytrack * (pitch - 60.0) / 12.0)
+
+    def start(self, note, now, accent=False):
         """Start a note: on a free voice, on a voice already playing this note
         (a retrigger), or on a stolen voice once its fade has finished."""
         if not self.amp_env.active:
-            self.filter.reset()  # nothing left over from this voice's last note
+            # A silent voice: clear what is left of its last note, and take the new
+            # accent straight away, since nothing can be heard to jump.
+            self.filter.reset()
+            if self.drive:
+                self.drive.reset()
+            self.accent = 1.0 if accent else 0.0
+        self.accent_target = 1.0 if accent else 0.0
         self.note = note
         self.held = True
         self.started_at = now
         self.release_in = 0
-        hz = float(midi_to_hz(note))
-        for osc, spec, _ in self.oscillators:
-            # Octaves double the frequency. Cents are hundredths of a semitone,
-            # 1200 to the octave, so +4 cents multiplies it by 2**(4/1200), 1.0023.
-            # The phases are left running rather than reset to 0. Resetting several
-            # oscillators together would start every note with all of them in step,
-            # the same spike each time. Running on, as analog oscillators do, each
-            # note starts from a slightly different alignment.
-            osc.set_frequency(hz * 2.0 ** (spec.octave + spec.cents / 1200.0))
-        # Key tracking: the cutoff follows the note by `keytrack` octaves per octave,
-        # measured from middle C, so a high note is not muffled relative to its own
-        # harmonics while a low one is wide open.
-        self.key_cutoff = self.patch.cutoff * 2.0 ** (self.patch.keytrack * (note - 60) / 12.0)
+        self.glide_left = 0
+        # The oscillator phases are left running rather than reset to 0. Resetting
+        # several oscillators together would start every note with all of them in
+        # step, the same spike each time. Running on, as analog oscillators do,
+        # each note starts from a slightly different alignment.
+        self.pitch = float(note)
+        self._set_pitch(self.pitch)
+        self.control = 0  # update the filter on this very sample
         self.amp_env.note_on()
         self.filter_env.note_on()
+
+    def glide_to(self, note, samples, accent=False):
+        """Legato: slide to `note` over `samples` without restarting the envelopes.
+
+        The slide is a straight line in semitones, so every semitone takes the
+        same time, and the glide time is the same whatever the interval. Pitch is
+        heard in ratios, so a straight line in semitones is an exponential curve
+        in Hz. A straight line in Hz would sound lopsided: going up from A2 to A3,
+        the first semitone is 6.5 Hz wide and the last 12.3 Hz, so a constant
+        speed in Hz rushes through the low semitones and drags through the high
+        ones, and the same glide time would sound different in every register.
+        """
+        self.note = note
+        self.held = True
+        self.release_in = 0
+        self.accent_target = 1.0 if accent else 0.0
+        self.glide_target = float(note)
+        self.glide_left = max(1, samples)
+        self.glide_step = (self.glide_target - self.pitch) / self.glide_left
 
     def release(self, now):
         self.held = False
@@ -754,10 +1004,11 @@ class PolyVoice:
         self.amp_env.note_off()
         self.filter_env.note_off()
 
-    def steal(self, note, now):
+    def steal(self, note, now, accent=False):
         """Fade this voice out, then start `note` on it."""
         self.fade = 0
         self.pending = note
+        self.pending_accent = accent
         self.pending_since = now
         self.pending_held_for = 0
 
@@ -766,15 +1017,31 @@ class PolyVoice:
             self.release_in -= 1
             if not self.release_in:
                 self.release(now)
+        if self.glide_left:
+            self.glide_left -= 1
+            self.pitch = self.glide_target if not self.glide_left else self.pitch + self.glide_step
+            self._set_pitch(self.pitch)
+        if self.accent != self.accent_target:
+            self.accent += (self.accent_target - self.accent) * ACCENT_SMOOTHING
+            if abs(self.accent_target - self.accent) < 1e-4:
+                self.accent = self.accent_target
         mix = F32(0.0)
-        for osc, _, level in self.oscillators:
+        for osc, level, _ in self.oscillators:
             mix = mix + osc.tick() * level
-        # The envelope adds octaves to the cutoff, which multiplies it by 2 to the
-        # power of that many octaves. Brightness, like pitch, is heard in ratios: a
-        # sweep from 200 to 400 Hz sounds as big as one from 2 to 4 kHz.
-        sweep = self.patch.env_amount * float(self.filter_env.tick())
-        self.filter.set(self.key_cutoff * 2.0**sweep, self.patch.q)
+        if self.drive:
+            mix = self.drive.tick(mix)
+        filter_level = float(self.filter_env.tick())
+        self.control -= 1
+        if self.control <= 0:
+            self.control = CONTROL_INTERVAL
+            # The envelope adds octaves to the cutoff, which multiplies it by 2 to
+            # the power of that many octaves. Brightness, like pitch, is heard in
+            # ratios: a sweep from 200 to 400 Hz sounds as big as 2 to 4 kHz.
+            octaves = (self.patch.env_amount + self.patch.accent_env * self.accent) * filter_level
+            self.filter.set(self.key_cutoff * 2.0**octaves, self.patch.q)
         out = self.filter.tick(mix) * self.amp_env.tick()
+        if self.accent:
+            out = out * F32(1.0 + (self.patch.accent_gain - 1.0) * self.accent)
         if self.fade >= 0:
             out = out * STEAL_FADE[self.fade]
             self.fade += 1
@@ -790,7 +1057,7 @@ class PolyVoice:
         self.filter_env.reset()
         note, held_for = self.pending, self.pending_held_for
         self.pending = None
-        self.start(note, now)
+        self.start(note, now, self.pending_accent)
         if held_for:
             # The key was already let go during the fade. The note starts 5 ms
             # late, so its release comes 5 ms late too and it keeps its full
@@ -812,7 +1079,7 @@ class PolySynth:
     def active(self):
         return any(not voice.free for voice in self.voices)
 
-    def note_on(self, note):
+    def note_on(self, note, accent=False):
         for voice in self.voices:
             if voice.fade >= 0 and voice.pending == note:
                 voice.pending_held_for = 0  # already on its way in, and held again
@@ -821,21 +1088,22 @@ class PolySynth:
                 # The same note is still sounding: retrigger that voice from its
                 # current level rather than stack a second copy, which would beat
                 # and partly cancel against the first.
-                voice.start(note, self.now)
+                voice.start(note, self.now, accent)
                 return
         for voice in self.voices:
             if voice.free:
-                voice.start(note, self.now)
+                voice.start(note, self.now, accent)
                 return
-        self._steal(note)
+        self._steal(note, accent)
 
-    def _steal(self, note):
+    def _steal(self, note, accent=False):
         candidates = [voice for voice in self.voices if voice.fade < 0]
         if not candidates:
             # Every voice is already fading out for some other note. Hand this note
             # to the voice that will finish its fade soonest instead.
             voice = max(self.voices, key=lambda v: v.fade)
-            voice.pending, voice.pending_since, voice.pending_held_for = note, self.now, 0
+            voice.pending, voice.pending_accent = note, accent
+            voice.pending_since, voice.pending_held_for = self.now, 0
             return
         releasing = [voice for voice in candidates if not voice.held]
         if releasing:
@@ -846,7 +1114,7 @@ class PolySynth:
             # Every voice is held. Take the oldest note: the one the ear has had
             # longest to get used to.
             victim = min(candidates, key=lambda v: v.started_at)
-        victim.steal(note, self.now)
+        victim.steal(note, self.now, accent)
 
     def note_off(self, note):
         for voice in self.voices:
@@ -864,18 +1132,67 @@ class PolySynth:
         return out * self.gain
 
 
-def render_poly(notes, patch):
-    """Render (note_number, start_time, duration) tuples through the 8-voice synth
-    to a mono float32 buffer at 48 kHz, running until every voice is silent."""
-    synth = PolySynth(patch)
+class MonoSynth:
+    """One voice with last-note priority, for bass lines and leads.
+
+    A note that starts while another key is still held is played legato: it
+    glides from the old pitch without restarting the envelopes, the way a
+    monophonic analog synth slides between tied notes. A detached note starts
+    fresh. Letting go of the newest key glides back to one still held.
+    """
+
+    def __init__(self, patch, sample_rate=SAMPLE_RATE):
+        self.voice = PolyVoice(patch, sample_rate)
+        self.glide = max(1, round(patch.glide * sample_rate))
+        self.held = []  # keys down, most recent last
+        self.gain = F32(patch.gain)
+        self.now = 0
+
+    @property
+    def active(self):
+        return not self.voice.free
+
+    def note_on(self, note, accent=False):
+        legato = bool(self.held) and not self.voice.free
+        if note in self.held:
+            self.held.remove(note)
+        self.held.append(note)
+        if legato:
+            self.voice.glide_to(note, self.glide, accent)
+        else:
+            self.voice.start(note, self.now, accent)
+
+    def note_off(self, note):
+        if note not in self.held:
+            return
+        was_sounding = self.held[-1] == note
+        self.held.remove(note)
+        if not was_sounding:
+            return
+        if self.held:
+            self.voice.glide_to(self.held[-1], self.glide, self.voice.accent_target > 0)
+        else:
+            self.voice.release(self.now)
+
+    def tick(self):
+        out = self.voice.tick(self.now) if not self.voice.free else F32(0.0)
+        self.now += 1
+        return out * self.gain
+
+
+def render_patch(notes, patch):
+    """Render (note_number, start_time, duration[, accent]) tuples through a patch
+    to a mono float32 buffer at 48 kHz, running until every voice is silent: the
+    single gliding voice for a mono patch, the eight voices otherwise."""
+    synth = MonoSynth(patch) if patch.mono else PolySynth(patch)
     events = note_events(notes)
     out = []
     n = 0
     i = 0
     while i < len(events) or synth.active:
         while i < len(events) and events[i][0] == n:
-            _, kind, note = events[i]
-            synth.note_on(note) if kind else synth.note_off(note)
+            _, kind, note, accent = events[i]
+            synth.note_on(note, accent) if kind else synth.note_off(note)
             i += 1
         out.append(synth.tick())
         n += 1
@@ -989,6 +1306,426 @@ def pad_progression(bpm=110):
     end = rolled_at + 0.3 * len(final) + 4.0
     notes += [(note, rolled_at + 0.3 * k, end - (rolled_at + 0.3 * k)) for k, note in enumerate(final)]
     return notes
+
+
+# Sequencer (phase 3b) -------------------------------------------------------
+
+
+@dataclass
+class Step:
+    """One step of a 16th-note sequence.
+
+    note: a MIDI note, or None for a rest.
+    gate: how much of the step the note is held. Below 1 the notes are detached.
+      Above 1 a note runs into the next step, which on a mono patch makes the
+      next note glide from it, as a tie did on 80s sequencers.
+    accent: play this step louder and with more filter sweep.
+    """
+
+    note: object = None
+    gate: float = 0.5
+    accent: bool = False
+
+
+def sequence(steps, bpm, start=0.0, swing=0.0):
+    """Turn 16th-note steps into (note, start, duration, accent) tuples.
+
+    swing pushes every second 16th late by that fraction of a step. 0 is
+    straight, and about 0.33 puts the off-beat 16ths on a triplet: a full
+    shuffle. Small amounts, 0.03 to 0.1, do not sound swung so much as less
+    mechanical.
+    """
+    step = 60.0 / bpm / 4
+    notes = []
+    for i, s in enumerate(steps):
+        if s.note is None:
+            continue
+        at = start + i * step + (swing * step if i % 2 else 0.0)
+        notes.append((s.note, at, s.gate * step, s.accent))
+    return notes
+
+
+# Effects (phase 3b) ---------------------------------------------------------
+
+
+class DelayLine:
+    """A circular buffer that remembers the most recent stretch of a signal, so
+    any point in that stretch can be read back."""
+
+    def __init__(self, longest):
+        size = 1
+        while size < longest + 2:
+            size *= 2  # a power of two, so wrapping round is a bit mask
+        self.buffer = np.zeros(size, dtype=F32)
+        self.mask = size - 1
+        self.pos = 0
+
+    def write(self, x):
+        self.buffer[self.pos] = x
+        self.pos = (self.pos + 1) & self.mask
+
+    def read(self, delay):
+        """The sample from `delay` samples ago, at least 1. Read before writing."""
+        return self.buffer[(self.pos - delay) & self.mask]
+
+    def read_between(self, delay):
+        """The signal `delay` samples ago, where delay need not be a whole number.
+
+        Why interpolate: a chorus sweeps its delay smoothly, so the delay it
+        wants is almost never a whole number of samples. Rounding it would make
+        the read position jump a whole sample each time the rounded value ticks
+        over. Every jump is a small step in the output, and dozens a second add
+        up to a zipper-like crackle. The pitch shift, which follows how fast the
+        delay changes, would also come out as a jittery staircase instead of a
+        smooth sweep. Linear interpolation draws a straight line between the two
+        neighbouring samples and reads off the point in between, so the output
+        moves as smoothly as the delay does. A straight line is only a rough
+        guess at the signal between samples: it dulls the top end slightly, by
+        an amount that varies with the fraction. Cubic or all-pass interpolation
+        guess better. For a chorus, whose 80s originals ran through dark
+        bucket-brigade chips anyway, linear is enough.
+        """
+        whole = int(delay)
+        fraction = F32(delay - whole)
+        newer = self.buffer[(self.pos - whole) & self.mask]
+        older = self.buffer[(self.pos - whole - 1) & self.mask]
+        return newer + (older - newer) * fraction
+
+
+class JunoChorus:
+    """A chorus in the style of the Roland Juno: two short delay lines whose
+    times are swept by one slow triangle wave, in opposite directions, one per
+    stereo side.
+
+    A delay whose length is changing plays its input back at a slightly
+    different speed, which shifts its pitch. As the delay shortens the output
+    catches up and the pitch rises; as it lengthens the pitch falls. Mixed with
+    the dry signal, that gently detuned copy sounds like a second player: the
+    same thickening as detuned oscillators, applied after the fact. With the
+    defaults the delay moves 3.6 ms every second, a speed change of 0.36%,
+    about 6 cents either way.
+
+    The two sides sweep in opposite directions, so while the left copy is sharp
+    the right one is flat. That spreads the sound wide in stereo, and summed to
+    mono the two detunings average out, so it stays in tune. A triangle wave
+    sweeps at a constant speed, so the detune holds steady and flips at each
+    turn, which is part of the Juno's sound; a sine would be smoother and vaguer.
+
+    The defaults, about half a cycle per second sweeping between roughly 1.7 and
+    5.3 ms, are close to the figures usually quoted for the Juno-60's Chorus I.
+    """
+
+    def __init__(self, rate=0.5, centre_ms=3.5, depth_ms=1.8, mix=0.7, sample_rate=SAMPLE_RATE):
+        self.centre = centre_ms * sample_rate / 1000.0
+        self.depth = depth_ms * sample_rate / 1000.0
+        self.line = DelayLine(int(self.centre + self.depth) + 2)
+        self.phase = 0.0
+        self.step = rate / sample_rate
+        self.mix = F32(mix)
+
+    def process(self, signal):
+        """A mono signal in, a stereo pair (dry plus chorus on each side) out."""
+        left = np.empty(len(signal), dtype=F32)
+        right = np.empty(len(signal), dtype=F32)
+        line, centre, depth, mix = self.line, self.centre, self.depth, self.mix
+        for n, x in enumerate(signal):
+            sweep = 4.0 * abs(self.phase - 0.5) - 1.0  # triangle wave, -1 to 1
+            self.phase += self.step
+            if self.phase >= 1.0:
+                self.phase -= 1.0
+            a = line.read_between(centre + depth * sweep)
+            b = line.read_between(centre - depth * sweep)
+            line.write(x)
+            left[n] = x + a * mix
+            right[n] = x + b * mix
+        return left, right
+
+
+class TempoDelay:
+    """A ping-pong delay locked to the tempo: repeats alternate left and right,
+    each one darker than the last.
+
+    The delay time is a number of beats. The default, 0.75, is a dotted 8th, the
+    classic 80s choice: its repeats land off the grid of the 16th-note sequence,
+    filling the gaps rather than doubling the notes.
+
+    Feedback sends each repeat back in for another pass. Below 1, every pass is
+    quieter and the repeats die away. At 1 or more, every pass would be as loud
+    or louder, and the repeats would build without end. Two things sit in the
+    loop to stop that and to shape it. A one-pole low-pass makes every pass lose
+    a little more top end, as tape and bucket-brigade delays did. A tanh limiter
+    barely touches quiet repeats but squashes loud ones, and it can never return
+    more than `feedback` in amplitude, so the loop's gain shrinks as its level
+    grows. Turned past 1, the delay swells into a self-sustaining wash at a
+    bounded level instead of blowing up.
+    """
+
+    def __init__(self, bpm, beats=0.75, feedback=0.45, tone=2500.0, sample_rate=SAMPLE_RATE):
+        self.length = round(beats * 60.0 / bpm * sample_rate)
+        self.left = DelayLine(self.length)
+        self.right = DelayLine(self.length)
+        self.feedback = float(feedback)
+        # The one-pole low-pass keeps this share of its previous output each
+        # sample; exp(-2 pi fc / fs) puts its -3 dB point near fc.
+        self.tone = F32(math.exp(-2.0 * math.pi * tone / sample_rate))
+        self.dark_left = self.dark_right = F32(0.0)
+
+    def process(self, signal):
+        """A mono send in, the stereo repeats (wet only) out."""
+        left = np.empty(len(signal), dtype=F32)
+        right = np.empty(len(signal), dtype=F32)
+        for n, x in enumerate(signal):
+            out_l = self.left.read(self.length)
+            out_r = self.right.read(self.length)
+            self.dark_left = out_l + (self.dark_left - out_l) * self.tone
+            self.dark_right = out_r + (self.dark_right - out_r) * self.tone
+            # Ping-pong: the left line takes the input plus the right line's
+            # repeats, the right line only the left's. A sound goes in, comes out
+            # on the left, then the right, then the left again.
+            self.left.write(x + F32(self.feedback * math.tanh(float(self.dark_right))))
+            self.right.write(F32(self.feedback * math.tanh(float(self.dark_left))))
+            left[n] = out_l
+            right[n] = out_r
+        return left, right
+
+
+def next_prime(n):
+    def is_prime(k):
+        if k < 2 or k % 2 == 0:
+            return k == 2
+        return all(k % d for d in range(3, int(k**0.5) + 1, 2))
+
+    while not is_prime(n):
+        n += 1
+    return n
+
+
+class Reverb:
+    """A Moorer-style reverb: eight comb filters in parallel, each with damping,
+    then four all-pass filters in series. Built twice, with slightly different
+    lengths, for the left and right channels.
+
+    A comb filter is a delay line fed back into itself. A sound goes round and
+    round, coming out once per trip, a little quieter each time. One comb is a
+    regular, buzzy echo; eight in parallel with different lengths blur into a
+    wash. The all-passes then smear each echo out in time without changing the
+    overall tone, since they pass every frequency at the same level and only
+    shift its timing. That thickens the wash into a smooth tail.
+
+    Damping: a one-pole low-pass inside each comb's loop, so high frequencies
+    lose more on every trip than low ones. The tail darkens as it fades, as it
+    does in a real room, where air and soft surfaces soak up the highs first.
+
+    Why the comb lengths share no common factors: a comb's echoes repeat every
+    D samples, and it resonates at every multiple of 48000 / D Hz. Combs whose
+    lengths share a factor keep echoing at the same moments and resonate at the
+    same frequencies, which piles up into a fluttering repeat and a metallic
+    ring. Lengths with no common factor (here each one is a prime number) only
+    line up after the product of their lengths, minutes later, so the echoes
+    interleave densely and the resonances spread evenly through the spectrum.
+    """
+
+    COMB_MS = (25.3, 26.9, 28.9, 30.7, 32.2, 33.8, 35.3, 36.7)
+    ALLPASS_MS = (12.6, 10.0, 7.7, 5.1)
+    STEREO_SPREAD = 23  # samples added to every right-channel length
+    ALLPASS_GAIN = 0.5
+
+    def __init__(self, size=0.88, damping=0.5, sample_rate=SAMPLE_RATE):
+        # size is each comb's feedback. With the combs about 31 ms long, 0.88
+        # gives a tail of around 1.7 s before damping shortens its top end.
+        self.size = size
+        self.damping = damping
+        self.lengths = []
+        for extra in (0, self.STEREO_SPREAD):
+            combs = [next_prime(round(ms * sample_rate / 1000.0) + extra) for ms in self.COMB_MS]
+            allpasses = [next_prime(round(ms * sample_rate / 1000.0) + extra) for ms in self.ALLPASS_MS]
+            self.lengths.append((combs, allpasses))
+
+    def process(self, signal):
+        """A mono send in, the stereo reverb (wet only) out."""
+        feedback, damp = F32(self.size), F32(self.damping)
+        keep, g = F32(1.0 - self.damping), F32(self.ALLPASS_GAIN)
+        # Eight combs feeding back at 0.88 add up to a large gain, so the input is
+        # scaled down to keep the tail near the level of what went in.
+        send = (signal * F32(0.05)).astype(F32)
+        channels = []
+        for comb_lengths, allpass_lengths in self.lengths:
+            combs = [np.zeros(n, dtype=F32) for n in comb_lengths]
+            comb_at = [0] * len(combs)
+            stored = [F32(0.0)] * len(combs)
+            allpasses = [np.zeros(n, dtype=F32) for n in allpass_lengths]
+            allpass_at = [0] * len(allpasses)
+            out = np.empty(len(send), dtype=F32)
+            for n, x in enumerate(send):
+                total = F32(0.0)
+                for k, buffer in enumerate(combs):
+                    i = comb_at[k]
+                    y = buffer[i]
+                    s = y * keep + stored[k] * damp  # the damping low-pass
+                    stored[k] = s
+                    buffer[i] = x + s * feedback
+                    comb_at[k] = i + 1 if i + 1 < comb_lengths[k] else 0
+                    total = total + y
+                for k, buffer in enumerate(allpasses):
+                    # The all-pass: w = x + g * w[n-D], y = w[n-D] - g * w. Its
+                    # gain is 1 at every frequency; only the timing is smeared.
+                    i = allpass_at[k]
+                    delayed = buffer[i]
+                    w = total + delayed * g
+                    buffer[i] = w
+                    total = delayed - w * g
+                    allpass_at[k] = i + 1 if i + 1 < allpass_lengths[k] else 0
+                out[n] = total
+            channels.append(out)
+        return channels[0], channels[1]
+
+
+# The 3b track ---------------------------------------------------------------
+
+SEQ_BASS = Patch(
+    oscillators=[
+        Osc("saw", cents=-4.0, level=0.5),
+        Osc("saw", cents=+4.0, level=0.5),
+        # The square an octave down is quieter than in the phase 3 bass. On these
+        # roots it sits at 37 to 55 Hz, and at 0.45 it put nearly half the track's
+        # energy below 80 Hz: headroom spent on weight most speakers cannot play.
+        Osc("square", octave=-1, level=0.3),
+    ],
+    # Driven hard into the filter. The saturation adds odd harmonics for the
+    # resonant filter to chew on, which is most of the "hard" in hard-driving.
+    drive=2.5,
+    slope=24,
+    cutoff=200.0,  # a little lower than the phase 3 bass, since the drive brightens it
+    q=3.5,
+    env_amount=3.5,
+    keytrack=0.5,
+    filter_env=(0.0, 0.5, 0.0, 0.08),
+    amp=(0.0, 0.3, 0.75, 0.06),
+    mono=True,
+    glide=0.06,  # tied steps slide over 60 ms, under half a 16th at 110 BPM
+    accent_gain=1.6,  # accented steps are 4 dB louder...
+    accent_env=1.2,  # ...and their filter opens 1.2 octaves further: they bark
+    gain=0.5,
+)
+
+LEAD = Patch(
+    oscillators=[
+        Osc("saw", cents=-6.0, level=0.5),
+        # A slightly narrow pulse against the saw: hollow and a little nasal, a
+        # classic 80s lead blend.
+        Osc("square", width=0.4, cents=+6.0, level=0.35),
+    ],
+    drive=1.6,  # light drive: warmth and sustain, not fuzz
+    slope=24,
+    # Open enough that the lead's upper harmonics reach 2 to 5 kHz, where the ear
+    # is most sensitive, so it cuts through the dark mix without sounding bright.
+    cutoff=1400.0,
+    q=2.0,
+    env_amount=1.5,
+    keytrack=0.6,  # the lead spans an octave and a half, so the filter follows it more closely
+    # The filter opens over 40 ms rather than snapping, so the lead sings
+    # rather than plucks, then settles a little under halfway.
+    filter_env=(0.04, 0.9, 0.45, 0.6),
+    amp=(0.012, 0.6, 0.85, 0.35),
+    mono=True,
+    glide=0.11,  # slower than the bass: audible, vocal slides between tied notes
+    gain=0.5,
+)
+
+TRACK_BPM = 110
+# Two bars per root: A minor, i i VI iv V i. E major at the V, as in phase 3.
+TRACK_ROOTS = [45, 45, 41, 38, 40, 45]  # A2 A2 F2 D2 E2 A2
+# Pad chords: (notes, first bar, number of bars), counting bars from 0.
+PAD_CHORDS = [
+    ([57, 60, 64, 69], 0, 4),  # A minor: A3 C4 E4 A4
+    ([57, 60, 65, 69], 4, 2),  # F major: A3 C4 F4 A4
+    ([57, 62, 65, 69], 6, 2),  # D minor: A3 D4 F4 A4
+    ([56, 59, 64, 68], 8, 2),  # E major: G#3 B3 E4 G#4
+    ([57, 60, 64, 69], 10, 3),  # A minor, held into the ending
+]
+# One bar of bass: (interval above the root, gate, accent). Accents fall on
+# every third 16th, a dotted-8th pulse that pulls against the 4/4 beat, with
+# the octave jumps between them. The last three steps are tied, so they glide:
+# up the octave, down to the fifth, back up.
+BASS_BAR = [
+    (0, 0.5, True), (0, 0.5, False), (12, 0.5, False),
+    (0, 0.5, True), (0, 0.5, False), (12, 0.5, False),
+    (0, 0.5, True), (0, 0.5, False), (12, 0.5, False),
+    (0, 0.5, True), (0, 0.5, False), (12, 0.5, False),
+    (0, 0.5, True), (12, 1.1, False), (7, 1.1, False), (12, 0.5, False),
+]  # fmt: skip
+# The lead enters at bar 5: (note, start beat, length in beats). A note that
+# runs past the next one's start is tied, and glides into it.
+LEAD_LINE = [
+    (76, 16.0, 1.5), (74, 17.5, 0.5), (72, 18.0, 2.1), (77, 20.0, 1.6), (76, 21.5, 2.0),
+    (74, 24.0, 2.1), (77, 26.0, 1.1), (81, 27.0, 2.5),
+    (77, 29.5, 0.45), (76, 30.0, 0.45), (74, 30.5, 0.45), (72, 31.0, 0.9),
+    (71, 32.0, 2.1), (68, 34.0, 1.6), (71, 35.5, 0.6), (74, 36.0, 2.1), (76, 38.0, 2.0),
+    (72, 40.0, 2.1), (71, 42.0, 1.1), (69, 43.0, 4.5),
+]  # fmt: skip
+
+
+def track_parts(bpm=TRACK_BPM):
+    """(bass, pad, lead) note lists for the 3b demo: 12 bars plus an ending."""
+    bar, beat = 4 * 60.0 / bpm, 60.0 / bpm
+    steps = []
+    for b in range(12):
+        root = TRACK_ROOTS[b // 2]
+        steps += [Step(root + interval, gate, accent) for interval, gate, accent in BASS_BAR]
+    steps.append(Step(TRACK_ROOTS[-1], gate=6.0, accent=True))  # the last note
+    bass = sequence(steps, bpm, swing=0.04)
+    pad = [(note, first * bar, bars * bar) for chord, first, bars in PAD_CHORDS for note in chord]
+    lead = [(note, start * beat, length * beat) for note, start, length in LEAD_LINE]
+    return bass, pad, lead
+
+
+def at_loudness(signal, dbfs):
+    """`signal` scaled so its RMS level, measured over the stretch where it is
+    actually playing, comes out at `dbfs`. Parts are balanced by loudness
+    rather than by peak level, since a spiky bass and a smooth pad with the same
+    peak sound nothing alike in level."""
+    peak = float(np.max(np.abs(signal)))
+    playing = np.flatnonzero(np.abs(signal) > 1e-4 * peak) if peak > 0 else []
+    if not len(playing):
+        return signal
+    span = signal[playing[0] : playing[-1] + 1].astype(np.float64)
+    rms = math.sqrt(float(np.mean(span * span)))
+    return (signal * F32(10.0 ** (dbfs / 20.0) / rms)).astype(F32)
+
+
+def render_track(bpm=TRACK_BPM):
+    """The 3b demo: sequenced bass, pad and gliding lead, through chorus, delay
+    and reverb. Returns a stereo float32 array, peak 0.8."""
+    bass_notes, pad_notes, lead_notes = track_parts(bpm)
+    parts = {}
+    for name, notes, patch in (("bass", bass_notes, SEQ_BASS), ("pad", pad_notes, PAD), ("lead", lead_notes, LEAD)):
+        started = time.perf_counter()
+        print(f"  {name}...", end="", flush=True)
+        parts[name] = render_patch(notes, patch)
+        print(f" {time.perf_counter() - started:.0f} s", flush=True)
+    length = max(len(part) for part in parts.values()) + round(3.5 * SAMPLE_RATE)  # room for the tails
+    bass, pad, lead = (np.pad(parts[k], (0, length - len(parts[k]))) for k in ("bass", "pad", "lead"))
+    bass = at_loudness(bass, -15.0)
+    pad = at_loudness(pad, -22.0)
+    lead = at_loudness(lead, -18.0)
+
+    started = time.perf_counter()
+    print("  effects...", end="", flush=True)
+    pad_l, pad_r = JunoChorus(rate=0.5).process(pad)
+    # A faster, shallower chorus on the lead, nearer the Juno's Chorus II, so the
+    # two parts do not swirl in step.
+    lead_l, lead_r = JunoChorus(rate=0.83, depth_ms=1.2, mix=0.5).process(lead)
+    echo_l, echo_r = TempoDelay(bpm).process((lead * F32(0.7) + pad * F32(0.15)).astype(F32))
+    send = (pad * F32(0.6) + lead * F32(0.45) + bass * F32(0.12) + (echo_l + echo_r) * F32(0.3)).astype(F32)
+    verb_l, verb_r = Reverb().process(send)
+    verb = np.concatenate([verb_l, verb_r]).astype(np.float64)
+    verb_scale = F32(10.0 ** (-22.0 / 20.0) / max(math.sqrt(float(np.mean(verb * verb))), 1e-12))
+    print(f" {time.perf_counter() - started:.0f} s", flush=True)
+
+    left = bass + pad_l * F32(0.7) + lead_l * F32(0.75) + echo_l * F32(0.5) + verb_l * verb_scale
+    right = bass + pad_r * F32(0.7) + lead_r * F32(0.75) + echo_r * F32(0.5) + verb_r * verb_scale
+    stereo = np.stack([left, right], axis=1).astype(F32)
+    return stereo * F32(0.8 / float(np.max(np.abs(stereo))))
 
 
 # Live playing (phase 1b) ----------------------------------------------------
@@ -1296,7 +2033,7 @@ def play_demo():
     for name, notes, patch in (("bass", bass_line(), BASS), ("pad", pad_progression(), PAD)):
         print(f"Rendering the {name}...", flush=True)
         started = time.perf_counter()
-        audio = render_poly(notes, patch)
+        audio = render_patch(notes, patch)
         peak = float(np.max(np.abs(audio)))
         if peak > 0.0:
             audio *= F32(0.8 / peak)  # same 0.8 peak as the arpeggio, for the same reason
@@ -1309,11 +2046,28 @@ def play_demo():
         sd.wait()
 
 
+def play_track():
+    """Render the phase 3b demo to hardpan_track.wav (stereo) and play it."""
+    import sounddevice as sd
+    import soundfile as sf
+
+    print("Rendering the track, which takes a few minutes...", flush=True)
+    started = time.perf_counter()
+    stereo = render_track()
+    path = Path(__file__).with_name("hardpan_track.wav")
+    sf.write(path, stereo, SAMPLE_RATE, subtype="FLOAT")
+    print(f"Wrote {path.name}: {len(stereo) / SAMPLE_RATE:.1f} s, rendered in {time.perf_counter() - started:.0f} s")
+    sd.play(stereo, SAMPLE_RATE)
+    sd.wait()
+
+
 if __name__ == "__main__":
     command = sys.argv[1] if len(sys.argv) > 1 else ""
     if command == "live":
         run_live(int(sys.argv[2]) if len(sys.argv) > 2 else 256)
     elif command == "demo":
         play_demo()
+    elif command == "track":
+        play_track()
     else:
         play_arpeggio()
