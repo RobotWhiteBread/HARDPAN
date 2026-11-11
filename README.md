@@ -58,3 +58,9 @@ uses for live MIDI input, has no Windows wheel for 3.13 yet.
 
 `hardpan_proto.py` renders a C major arpeggio to `hardpan_proto.wav` and plays
 it through the default output device.
+
+`.venv\Scripts\python hardpan_proto.py live` plays it live from any connected
+MIDI keyboard. With none connected, it opens a small window that turns the
+computer keyboard into a piano (A S D F G H J K L ; ' for the white keys, W E
+T Y U O P for the black, from C4). An optional block size can follow `live`,
+for example `live 128`.

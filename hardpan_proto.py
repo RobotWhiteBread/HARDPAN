@@ -17,8 +17,9 @@ Intentionally not implemented yet:
   that is still held.
 - Velocity (MIDI velocity is read and ignored), pitch bend, glide, sustain pedal.
 - Sample-accurate timing for live notes. A live note starts at the beginning of
-  the next audio block, so up to one block late. The offline render is sample
-  accurate because it knows every note in advance.
+  the next audio callback, so it can be late by up to the time between
+  callbacks (see LiveEngine._callback). The offline render is sample accurate
+  because it knows every note in advance.
 - Choosing an audio device or MIDI port by hand. Live mode takes ASIO if a
   driver is installed, then WASAPI, then the Windows default, and opens every
   MIDI input present at startup.
@@ -419,9 +420,13 @@ class LiveEngine:
         voice = self.voice
         events = self.events
         # Every event waiting at the start of the block is applied right here, so
-        # a live note starts up to one block late: 5.3 ms at 256 frames, 2.7 ms at
-        # 128. The block size is the trade between that delay and the risk of
-        # missing the deadline.
+        # a live note can start late by up to the time between callbacks. With
+        # ASIO that is typically one block: 5.3 ms at 256 frames, 2.7 ms at 128,
+        # and the block size is the trade between that delay and the risk of
+        # missing the deadline. WASAPI's shared mode instead asks for several
+        # blocks back to back, once per device period (about 10 ms on the laptop
+        # this was measured on). There the period sets the delay, and smaller
+        # blocks do not help.
         while events:
             kind, note = events.popleft()
             if kind == "on":
