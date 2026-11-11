@@ -158,8 +158,12 @@ Constraints that matter more than features:
 - No allocation in the process callback. None. Preallocate all voice state.
 - No locks in the audio thread.
 - Parameter smoothing on anything a user can turn, or it will click.
-- Keep the DSP in a separate module from the plugin wrapper so the math is
-  testable without a host.
+- Keep the DSP in its own crate, separate from the plugin wrapper, so the math
+  is testable without a host.
+- Make that DSP crate no_std (use the libm crate for sin, exp and the like;
+  tests may still use std). The same crate will later run on a Daisy Seed
+  pedal, so it cannot depend on the standard library or an allocator. The
+  plugin wrapper can use std freely.
 
 Write unit tests for the oscillator and envelope that assert on sample values,
 not just that the code runs.

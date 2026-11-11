@@ -33,6 +33,14 @@ before you write any code, because switching later is annoying.
 | https://github.com/RustAudio/cpal | Cross-platform audio I/O, for a standalone binary |
 | https://github.com/RustAudio/dasp | DSP fundamentals: sample types, frame conversion, interpolation |
 
+## Daisy Seed (the pedal)
+
+| Repo | What it gives you |
+|---|---|
+| https://github.com/zlosynth/daisy | `daisy` crate: no_std Rust board support. Choose the board by feature: original Seed (AK4556), Seed 1.1 (WM8731), Seed 1.2 (PCM3060). API marked unstable |
+| https://lib.rs/crates/daisy-embassy | Async Rust board support on Embassy. Newer and smaller than `daisy`, with similar board coverage |
+| https://github.com/electro-smith/libDaisy | The official C++ hardware library. The fallback if Rust does not cover your revision |
+
 ## Python prototyping
 
 Fastest loop for getting the math right before fighting a plugin format:

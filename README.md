@@ -14,7 +14,20 @@ thing everything else sits on.
 
 ## Stack
 Rust with `nih-plug`, or Python with `numpy` plus `sounddevice` for
-prototyping.
+prototyping. The Rust DSP lives in one `no_std` crate, so the same code runs in
+the plugin and on a Daisy Seed pedal (`GUITAR_RIG.md`).
+
+## What gets written by hand
+Everything that makes or shapes sound: oscillators, envelopes, filters, voice
+allocation, the time-based effects (delay, reverb, chorus, flanger, phaser,
+tremolo), and the forward pass of any neural capture model HARDPAN runs.
+
+The one exception is *training* neural captures of your own pedals
+(`GUITAR_RIG.md` section 4), which uses Neural Amp Modeler or GuitarML's
+trainer. Training a network is a measurement process, not the signal
+processing this project is about. RTNeural, the runtime those captures
+normally play through, serves as the reference HARDPAN's own inference is
+checked against, not as a replacement for it.
 
 ## Milestones
 1. A single-voice sine oscillator with an ADSR envelope that responds to MIDI

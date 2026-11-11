@@ -41,8 +41,10 @@ anticipate; Bluetooth latency drifts.
 A USB audio interface, which solves the problem from both directions at once.
 It is how the guitar gets *into* the computer in the first place, and its
 outputs are wired, so they are also how sound gets back out with single-digit
-millisecond latency. On Windows, get one with a real ASIO driver; the generic
-Windows audio path will not give you low latency even over a cable.
+millisecond latency. On Windows, get one with a real ASIO driver. The built-in
+Windows path (WASAPI) can get output latency down to a few milliseconds, but a
+low round trip, guitar in and sound back out, is dependable over ASIO, and
+ASIO is what DAWs and plugin hosts expect.
 
 That one purchase unlocks the guitar input path, the low-latency output, and
 the pedal capture rig in section 4, which needs simultaneous in and out
@@ -57,8 +59,8 @@ Plugging into the effects return (sometimes labeled power amp in) bypasses the
 preamp and treats your amp as a power amp and speaker. Cleanest result.
 
 **Option B, a reamp box.** A reamp box converts line level back down to
-instrument level and impedance, so your synth sees the amp exactly like a
-guitar does. This is the option to pick if you *want* the preamp grit and
+instrument level and impedance, so the amp sees your synth much as it would
+see a guitar. This is the option to pick if you *want* the preamp grit and
 want the synth to sit in the same tonal world as your guitar.
 
 **Option C, make HARDPAN a pedal.** See below. This is the real answer.
@@ -85,6 +87,13 @@ with its own open-source hardware library (libDaisy) and DSP library
 (DaisySP), programmed in C++. Paired with a pedal interface board it becomes
 a stompbox with 1/4" jacks, knobs, footswitches, and 9V power, which means
 HARDPAN sits on your board between the pedals you already own.
+
+HARDPAN does not have to switch languages to get there. Rust board support
+exists for the Daisy Seed (see `REPOS.md`), so all the DSP lives in one
+`no_std` Rust crate that both the plugin (`BUILD_PROMPT.md` phase 4) and the
+pedal firmware (phase G5 below) use. If Rust support turns out not to cover
+your board revision, the same crate can be called from a C++ libDaisy
+firmware instead. Either way HARDPAN runs its own DSP, not DaisySP.
 
 Interface board options:
 
@@ -291,8 +300,10 @@ physically cannot do on the floor.
 
 ## 6. Build prompts for this track
 
-Paste one phase at a time. These assume Phase 1 to 3 of `BUILD_PROMPT.md`
-are done, since they all need the filter and envelope.
+Paste one phase at a time. G1 to G3 assume phases 1 to 3 of
+`BUILD_PROMPT.md` are done, since they need the filter and envelope. G4 and
+G5 also need phase 4: real-time neural inference and the pedal firmware both
+build on its Rust DSP crate.
 
 ### Phase G1: listen to the guitar
 
@@ -355,9 +366,16 @@ I should prefer for a drive pedal whose gain knob I actually use.
 ### Phase G4: pedals as synth modules
 
 ```
-Add a neural model inference stage to HARDPAN that can load a trained capture
-and process audio through it in real time. Use RTNeural, which is the engine
-both GuitarML and the Daisy ports use.
+Add a neural model inference stage to HARDPAN's Rust DSP crate that can run a
+trained capture in real time. Write the model's forward pass yourself, in the
+crate, rather than linking RTNeural: the crate is no_std so it can run on the
+pedal, and RTNeural is C++. Start with the GRU and LSTM models GuitarML's
+trainer exports; NAM's standard WaveNet models are far heavier and belong in
+the plugin only. Parse model files in the plugin wrapper and hand the crate
+plain weight arrays, so the pedal can compile its weights in.
+
+Before using it, check it sample for sample against RTNeural or the trainer's
+own inference on the same input file, and tell me the largest difference.
 
 Then build a routing matrix, not a fixed chain, that lets me place the model
 anywhere: on the guitar input, on the synth oscillator before the filter, on
@@ -373,4 +391,33 @@ Requirements:
 - Keep inference out of any allocation path.
 
 Start by showing me the routing data structure before you write any DSP.
+```
+
+### Phase G5: HARDPAN on the pedal
+
+```
+Run HARDPAN on a Daisy Seed in a PedalPCB Terrarium, using the same Rust DSP
+crate as the plugin. Do not fork or rewrite the DSP for the pedal.
+
+First ask me which Daisy Seed revision I have, since revisions use different
+audio codecs. Then check what currently exists for running Rust on that exact
+revision; the daisy and daisy-embassy crates are the ones to start with. Show
+me the evidence, such as supported board features and recent releases, before
+you choose.
+
+- If Rust board support covers my revision, write the firmware in Rust with
+  the DSP crate as a dependency.
+- If it does not, build the DSP crate as a static library with a C interface
+  and write a thin C++ firmware on libDaisy that calls it. Either way there is
+  still one DSP implementation, shared with the plugin.
+
+Then:
+1. Guitar in, amp out, mono. Port the phase G1 envelope follower and
+   guitar-as-oscillator mode into the DSP crate first, with tests showing they
+   match the Python prototype's output on the same input file.
+2. Map the Terrarium's knobs, switches, and footswitches to parameters, with
+   the same smoothing as the plugin. Bypass must not click.
+3. High-pass the output, per the guitar speaker warning in section 1.
+4. Measure how much of each audio block the DSP uses, and tell me how many
+   synth voices and which capture model sizes actually fit.
 ```

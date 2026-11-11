@@ -1,18 +1,27 @@
-"""HARDPAN phase 1: a monophonic sine synth, rendered offline.
+"""HARDPAN phases 1 and 1b: a monophonic sine synth, rendered offline or played live.
 
-One sine oscillator and one ADSR envelope, driven by a list of
-(note_number, start_time, duration) tuples and rendered sample by sample into
-a 48 kHz mono float32 buffer. All of the synthesis math is written out in this
-file. numpy holds the samples, soundfile writes the WAV, and sounddevice plays it.
+One sine oscillator and one ADSR envelope, computed one sample at a time in
+float32 at 48 kHz. All of the synthesis math is written out in this file.
+numpy holds the samples, soundfile writes the WAV, sounddevice talks to the
+sound card, and mido reads MIDI.
+
+    python hardpan_proto.py            render a C major arpeggio to
+                                       hardpan_proto.wav and play it
+    python hardpan_proto.py live       play live from a MIDI keyboard, or from
+                                       the computer keyboard if none is connected
+    python hardpan_proto.py live 128   the same, with 128-frame audio blocks
 
 Intentionally not implemented yet:
-- Live MIDI input. Notes come from a list. mido comes in when rendering moves
-  into a real-time audio callback.
-- Real-time rendering. The whole buffer is rendered first and then played.
 - Polyphony. There is one voice. A note that starts while another is held takes
   the voice over (last-note priority), and releasing it falls back to a note
   that is still held.
-- Velocity, pitch bend, glide, sustain pedal.
+- Velocity (MIDI velocity is read and ignored), pitch bend, glide, sustain pedal.
+- Sample-accurate timing for live notes. A live note starts at the beginning of
+  the next audio block, so up to one block late. The offline render is sample
+  accurate because it knows every note in advance.
+- Choosing an audio device or MIDI port by hand. Live mode takes ASIO if a
+  driver is installed, then WASAPI, then the Windows default, and opens every
+  MIDI input present at startup.
 - Any waveform other than sine. A sine has no harmonics above its fundamental,
   so it cannot alias, and anti-aliasing waits for saw and square (phase 2).
 - Filters (phase 3).
@@ -23,6 +32,10 @@ Intentionally not implemented yet:
 """
 
 import math
+import os
+import sys
+import time
+from collections import deque
 from pathlib import Path
 
 import numpy as np
@@ -220,12 +233,64 @@ class ADSR:
         return self.level
 
 
+class MonoVoice:
+    """One oscillator and one envelope, plus the decision about which note sounds.
+
+    There is one voice, with last-note priority. The held list remembers which
+    keys are still down. Without it, playing legato (B starts before A ends) and
+    then ending A would silence B, because A's note-off would release the voice.
+    """
+
+    def __init__(self, attack=0.010, decay=0.150, sustain=0.7, release=0.300):
+        self.osc = SineOscillator()
+        self.env = ADSR(attack, decay, sustain, release)
+        self.held = []  # notes currently down, most recent last
+
+    @property
+    def active(self):
+        return self.env.active
+
+    def note_on(self, note):
+        if note in self.held:
+            self.held.remove(note)
+        self.held.append(note)
+        if not self.env.active:
+            # A silent voice has nothing to stay continuous with, so restart the
+            # phase. Each note then begins at sin(0) = 0 and every attack sounds
+            # alike. While the voice is sounding, the phase is never reset: that
+            # would jump the waveform mid-cycle, which is a click.
+            self.osc.reset()
+        self.osc.set_frequency(midi_to_hz(note))
+        self.env.note_on()
+
+    def note_off(self, note):
+        if note not in self.held:
+            return
+        was_sounding = self.held[-1] == note
+        self.held.remove(note)
+        if not was_sounding:
+            return
+        if self.held:
+            self.osc.set_frequency(midi_to_hz(self.held[-1]))  # back to the key still held, no retrigger
+        else:
+            self.env.note_off()
+
+    def all_notes_off(self):
+        self.held.clear()
+        self.env.note_off()
+
+    def tick(self):
+        # The envelope is a gain applied to the oscillator, sample by sample.
+        # Multiplying is what amplitude means: an envelope of 0.5 is half the
+        # waveform's height, which is 6 dB quieter.
+        return self.osc.tick() * self.env.tick()
+
+
 def render(notes, attack=0.010, decay=0.150, sustain=0.7, release=0.300):
     """Render (note_number, start_time, duration) tuples, with times in seconds,
     to a mono float32 buffer at 48 kHz. The buffer runs until the last release
     has reached silence."""
-    osc = SineOscillator()
-    env = ADSR(attack, decay, sustain, release)
+    voice = MonoVoice(attack, decay, sustain, release)
 
     # Sample-accurate means each note-on and note-off happens on its own sample,
     # the nearest one to its time, rather than at the start of some block.
@@ -240,57 +305,285 @@ def render(notes, attack=0.010, decay=0.150, sustain=0.7, release=0.300):
         events.append((off, 0, note))
     events.sort()
 
-    # One voice, last-note priority. The held list remembers which keys are
-    # still down. Without it, playing legato (B starts before A ends) and then
-    # ending A would silence B, because A's note-off would release the voice.
-    held = []
-
-    def note_on(note):
-        if note in held:
-            held.remove(note)
-        held.append(note)
-        if not env.active:
-            # A silent voice has nothing to stay continuous with, so restart the
-            # phase. Each note then begins at sin(0) = 0 and every attack sounds
-            # alike. While the voice is sounding, the phase is never reset: that
-            # would jump the waveform mid-cycle, which is a click.
-            osc.reset()
-        osc.set_frequency(midi_to_hz(note))
-        env.note_on()
-
-    def note_off(note):
-        if note not in held:
-            return
-        was_sounding = held[-1] == note
-        held.remove(note)
-        if not was_sounding:
-            return
-        if held:
-            osc.set_frequency(midi_to_hz(held[-1]))  # back to the key still held, no retrigger
-        else:
-            env.note_off()
-
     out = []
     n = 0
     i = 0
-    while i < len(events) or env.active:
+    while i < len(events) or voice.active:
         while i < len(events) and events[i][0] == n:
             _, kind, note = events[i]
-            note_on(note) if kind else note_off(note)
+            voice.note_on(note) if kind else voice.note_off(note)
             i += 1
-        # The envelope is a gain applied to the oscillator, sample by sample.
-        # Multiplying is what amplitude means: an envelope of 0.5 is half the
-        # waveform's height, which is 6 dB quieter.
-        out.append(osc.tick() * env.tick())
+        out.append(voice.tick())
         n += 1
     return np.array(out, dtype=F32)
 
 
-if __name__ == "__main__":
+# Live playing (phase 1b) ----------------------------------------------------
+
+# Live output has to be scaled before anyone hears it, since there is no
+# finished buffer to normalize. 0.8 matches the peak the offline render is
+# normalized to, so live and rendered notes play at the same level.
+LIVE_GAIN = F32(0.8)
+
+# Two rows of a QWERTY keyboard laid out like piano keys, from C4 (MIDI 60).
+KEY_TO_NOTE = {
+    "a": 60, "w": 61, "s": 62, "e": 63, "d": 64, "f": 65, "t": 66, "g": 67, "y": 68,
+    "h": 69, "u": 70, "j": 71, "k": 72, "o": 73, "l": 74, "p": 75, "semicolon": 76,
+    "apostrophe": 77,
+}
+KEY_LAYOUT = (
+    "   W E   T Y U   O P\n"
+    "  A S D F G H J K L ; '\n"
+    "  C D E F G A B C D E F    from C4\n"
+    "\n"
+    "Esc or close the window to quit."
+)
+NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
+
+
+def note_name(note):
+    return f"{NOTE_NAMES[note % 12]}{note // 12 - 1}"
+
+
+class LiveEngine:
+    """Runs a MonoVoice inside the sound card's callback.
+
+    The sound card plays one block while the next is being computed. The
+    callback that computes it runs on PortAudio's audio thread and has a hard
+    deadline: if the block is not ready when the previous one runs out, the
+    card plays a gap instead (an underrun), which is heard as a click. So the
+    callback does nothing that can make it wait: no printing, no files, no MIDI
+    ports, no locks someone else might be holding.
+
+    Notes come from other threads (mido's, or the keyboard window's) through a
+    deque. Appending to one end and popping from the other are each atomic in
+    CPython, so neither side needs a lock and the callback never waits for the
+    sender. It is not truly lock-free, since every Python thread still has to
+    take the interpreter lock to run at all; see run_live for how that wait is
+    kept short.
+    """
+
+    def __init__(self, sd, blocksize=256):
+        self.voice = MonoVoice()
+        self.events = deque()
+        self.blocksize = blocksize
+        self.underruns = 0
+        self.blocks = 0
+        self.busy_seconds = 0.0
+        self.busy_peak = 0.0
+        self.stream, self.device_name = self._open(sd)
+        self.latency = self.stream.latency
+
+    def _open(self, sd):
+        # Windows' default device goes through MME, which adds around 100 ms of
+        # latency: enough to feel every note arrive late. ASIO (when a driver is
+        # installed) and WASAPI talk to the hardware far more directly.
+        candidates = []
+        for wanted in ("ASIO", "Windows WASAPI"):
+            for api in sd.query_hostapis():
+                if api["name"] == wanted and api["default_output_device"] >= 0:
+                    candidates.append(api["default_output_device"])
+        candidates.append(None)  # the system default, as a last resort
+        errors = []
+        for device in candidates:
+            info = sd.query_devices(device, "output")
+            api = sd.query_hostapis(info["hostapi"])["name"]
+            # WASAPI shared mode normally insists on the sample rate Windows mixes
+            # at. auto_convert lets Windows resample when that is not 48 kHz.
+            extra = sd.WasapiSettings(auto_convert=True) if "WASAPI" in api else None
+            try:
+                stream = sd.OutputStream(
+                    samplerate=SAMPLE_RATE,
+                    blocksize=self.blocksize,
+                    device=device,
+                    channels=min(2, info["max_output_channels"]),
+                    dtype="float32",
+                    latency="low",
+                    extra_settings=extra,
+                    callback=self._callback,
+                )
+            except sd.PortAudioError as error:
+                errors.append(f"{info['name']} ({api}): {error}")
+                continue
+            return stream, f"{info['name']} ({api})"
+        raise RuntimeError("Could not open an audio output:\n" + "\n".join(errors))
+
+    def post(self, kind, note=None):
+        """Queue an event for the audio thread. kind is "on", "off" or "all_off"."""
+        self.events.append((kind, note))
+
+    def _callback(self, outdata, frames, time_info, status):
+        start = time.perf_counter()
+        if status.output_underflow:
+            self.underruns += 1
+        voice = self.voice
+        events = self.events
+        # Every event waiting at the start of the block is applied right here, so
+        # a live note starts up to one block late: 5.3 ms at 256 frames, 2.7 ms at
+        # 128. The block size is the trade between that delay and the risk of
+        # missing the deadline.
+        while events:
+            kind, note = events.popleft()
+            if kind == "on":
+                voice.note_on(note)
+            elif kind == "off":
+                voice.note_off(note)
+            else:
+                voice.all_notes_off()
+        if voice.active:
+            left = outdata[:, 0]
+            for i in range(frames):
+                left[i] = voice.tick() * LIVE_GAIN
+            outdata[:, 1:] = outdata[:, :1]  # the same mono signal on every channel
+        else:
+            # A silent voice would produce zeros anyway. Skipping the per-sample
+            # loop just saves the work.
+            outdata.fill(0.0)
+        busy = time.perf_counter() - start
+        self.blocks += 1
+        self.busy_seconds += busy
+        if busy > self.busy_peak:
+            self.busy_peak = busy
+
+    def status(self):
+        budget = self.blocksize / SAMPLE_RATE
+        average = self.busy_seconds / self.blocks if self.blocks else 0.0
+        return (
+            f"Output: {self.device_name}\n"
+            f"Block: {self.blocksize} frames ({budget * 1000:.1f} ms). "
+            f"Reported output latency: {self.latency * 1000:.1f} ms\n"
+            f"Underruns: {self.underruns}. Callback uses {average / budget:.0%} of its "
+            f"time on average, {self.busy_peak / budget:.0%} at peak"
+        )
+
+    def start(self):
+        self.stream.start()
+
+    def close(self):
+        # Stopping the stream mid-note would cut the waveform off: one last click.
+        # So release everything, wait for the release to reach silence, and only
+        # then stop. stop() lets the blocks already queued play out.
+        self.post("all_off")
+        deadline = time.monotonic() + 5.0
+        while (self.events or self.voice.active) and self.stream.active and time.monotonic() < deadline:
+            time.sleep(0.01)
+        self.stream.stop()
+        self.stream.close()
+
+
+def open_midi_inputs(engine):
+    """Open every MIDI input port. mido delivers each message on its own thread."""
+    import mido
+
+    def on_message(msg):
+        if msg.type == "note_on" and msg.velocity > 0:
+            engine.post("on", msg.note)
+        elif msg.type in ("note_on", "note_off"):
+            # Many keyboards end a note with note-on at velocity 0 rather than a
+            # real note-off. MIDI's running status lets a run of messages of the
+            # same type skip their status byte, so staying on note-on saves a byte
+            # per note on a slow serial link.
+            engine.post("off", msg.note)
+        elif msg.type == "control_change" and msg.control in (120, 123):  # all sound off, all notes off
+            engine.post("all_off")
+
+    ports = []
+    for name in mido.get_input_names():
+        try:
+            ports.append(mido.open_input(name, callback=on_message))
+        except Exception as error:  # rtmidi raises its own error types
+            print(f"Could not open MIDI input {name!r}: {error}")
+    return ports
+
+
+def run_keyboard_window(engine):
+    """Two rows of computer keys as a piano, for when no MIDI keyboard is connected.
+
+    It is a window rather than the terminal because a terminal reports only key
+    presses, and note-off needs releases. Windows repeats a held key as more
+    presses with no release in between, so a press for a key already down is
+    ignored.
+    """
+    import tkinter as tk
+
+    root = tk.Tk()
+    root.title("HARDPAN")
+    label = tk.Label(root, font=("Consolas", 12), justify="left", anchor="w", padx=24, pady=20)
+    label.pack()
+    down = set()
+
+    def press(event):
+        key = event.keysym.lower()
+        if key == "escape":
+            root.destroy()
+        elif key in KEY_TO_NOTE and key not in down:
+            down.add(key)
+            engine.post("on", KEY_TO_NOTE[key])
+
+    def release(event):
+        key = event.keysym.lower()
+        if key in down:
+            down.discard(key)
+            engine.post("off", KEY_TO_NOTE[key])
+
+    def release_all(event=None):
+        # A key held while the window loses focus never sends its release, so let
+        # go of everything rather than leave a note stuck on.
+        for key in down:
+            engine.post("off", KEY_TO_NOTE[key])
+        down.clear()
+
+    def refresh():
+        held = list(engine.voice.held)  # copied, since the audio thread changes it
+        playing = note_name(held[-1]) if held else "-"
+        label.configure(text=f"{KEY_LAYOUT}\n\nPlaying: {playing}\n\n{engine.status()}")
+        root.after(200, refresh)
+
+    root.bind("<KeyPress>", press)
+    root.bind("<KeyRelease>", release)
+    root.bind("<FocusOut>", release_all)
+    refresh()
+    root.mainloop()
+
+
+def run_live(blocksize=256):
+    # sounddevice only offers ASIO if this is set before it is first imported.
+    os.environ.setdefault("SD_ENABLE_ASIO", "1")
+    import sounddevice as sd
+
+    # The audio callback is Python, so it must take the interpreter lock before
+    # it can start. A thread that is running gets to hold that lock for up to the
+    # switch interval, 5 ms by default, which is nearly a whole 256-frame block.
+    # 1 ms keeps that wait well inside the deadline.
+    sys.setswitchinterval(0.001)
+
+    engine = LiveEngine(sd, blocksize)
+    ports = open_midi_inputs(engine)
+    engine.start()
+    print(engine.status())
+    try:
+        if ports:
+            print("MIDI in:", ", ".join(port.name for port in ports))
+            print("Ctrl+C to stop.")
+            while True:
+                time.sleep(0.2)
+        else:
+            print("No MIDI input found, so opening the computer-keyboard window.")
+            run_keyboard_window(engine)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        for port in ports:  # first, so no new note arrives during the final release
+            port.close()
+        engine.close()
+        print(engine.status())
+
+
+def play_arpeggio():
     import sounddevice as sd
     import soundfile as sf
 
-    # C major arpeggio up two octaves and back: C4 E4 G4 C5 E5 C5 G4 E4, ending
+    # C major arpeggio up to E5 and back: C4 E4 G4 C5 E5 C5 G4 E4, ending
     # on a held C4. Each note ends 50 ms before the next begins, so every new
     # attack starts partway through the previous note's release. That is the
     # boundary where a careless envelope clicks.
@@ -314,3 +607,10 @@ if __name__ == "__main__":
 
     sd.play(audio, SAMPLE_RATE)
     sd.wait()
+
+
+if __name__ == "__main__":
+    if len(sys.argv) > 1 and sys.argv[1] == "live":
+        run_live(int(sys.argv[2]) if len(sys.argv) > 2 else 256)
+    else:
+        play_arpeggio()
