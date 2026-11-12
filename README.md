@@ -108,9 +108,8 @@ rules.
 
 ## The hardware rig
 
-`RIG_SETUP.md` is the setup for the MOTU M2, MiniLab 3 and MicroFreak:
-drivers, cabling, REAPER settings, and the MicroFreak's vocoder and samples.
-`rig_check.py` checks it:
+`rig_check.py` checks a rig built around a MOTU M2 interface, an Arturia
+MiniLab 3 keyboard and an Arturia MicroFreak:
 
 ```powershell
 .venv\Scripts\python rig_check.py devices    # is everything connected?
