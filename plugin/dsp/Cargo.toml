@@ -1,0 +1,11 @@
+[package]
+name = "hardpan-dsp"
+version = "0.1.0"
+edition = "2024"
+authors = ["RobotWhiteBread"]
+license = "ISC"
+description = "HARDPAN's signal processing: no_std and allocation-free, so the same code runs in the plugin and on a Daisy Seed."
+
+[dependencies]
+# sin, cos, exp, tanh and friends without the standard library.
+libm = "0.2"

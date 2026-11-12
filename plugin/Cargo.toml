@@ -1,0 +1,47 @@
+[package]
+name = "hardpan"
+version = "0.1.0"
+edition = "2024"
+authors = ["RobotWhiteBread"]
+license = "ISC"
+homepage = "https://github.com/RobotWhiteBread/HARDPAN"
+description = "A synthesizer built from first principles"
+
+[lib]
+crate-type = ["cdylib"]
+
+# The plugin wrapper (this crate) and the DSP it wraps, kept apart so the math
+# is testable without a host and can run on hardware without std.
+[workspace]
+members = [".", "dsp"]
+
+[dependencies]
+hardpan-dsp = { path = "dsp" }
+nice-plug = { version = "0.4.2", default-features = false, features = [
+    "vst3",
+    "tracing-subscriber",
+    # Remove assert_process_allocs to allow audio-thread allocations in debug builds.
+    "assert_process_allocs",
+]}
+tracing = "0.1"
+tracing-subscriber = "0.3.23"
+
+[dev-dependencies]
+# For tests/clap_host.rs, a minimal CLAP host that loads the built plugin.
+clap-sys = "0.5"
+
+# Enable a small amount of optimization in the dev profile.
+[profile.dev]
+opt-level = 1
+
+# Enable more optimizations in the release profile at the cost of compile time.
+[profile.release]
+codegen-units = 1
+lto = "thin"
+# Optional. May help reduce binary size.
+strip = "symbols"
+
+[profile.profiling]
+inherits = "release"
+debug = true
+strip = "none"
