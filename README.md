@@ -14,7 +14,7 @@ thing everything else sits on.
 
 ## Sound target
 Dark and hard-driving, with an 80s edge. On one side, the eerie, ominous
-score Nick Cave and Warren Ellis wrote for *Dahmer*; on the other, the
+screen scores of Nick Cave and Warren Ellis; on the other, the
 pulsing sequenced basslines of John Carpenter's scores and 80s-inspired
 darksynth. In synth terms:
 - Sawtooth oscillators detuned a few cents apart, with a square
