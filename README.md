@@ -91,6 +91,42 @@ stereo track to `hardpan_track.wav` and plays it: a sequenced bass with drive,
 accents and glides, the pad, and a gliding lead, through chorus, delay and
 reverb. Rendering takes about two minutes.
 
+## The plugin (phase 4)
+
+`plugin/` is HARDPAN as a CLAP and VST3 instrument, a Rust port of the
+prototype on nice-plug. `plugin\bundle.ps1` builds it into
+`plugin\target\bundled\`; see `plugin/README.md` for installing, playing and
+testing it.
+
+## SILT: outside audio
+
+`silt.py` brings outside audio into a library HARDPAN can play: your own
+recordings, AI-generated files, tracks you own, and sample packs. Each item is
+converted to 48 kHz float, keeps its original, and carries a
+`cleared_for_release` flag. See `SILT.md` for the phases and the release
+rules.
+
+## The hardware rig
+
+`RIG_SETUP.md` is the setup for the MOTU M2, MiniLab 3 and MicroFreak:
+drivers, cabling, REAPER settings, and the MicroFreak's vocoder and samples.
+`rig_check.py` checks it:
+
+```powershell
+.venv\Scripts\python rig_check.py devices    # is everything connected?
+.venv\Scripts\python rig_check.py midi       # what is the keyboard sending?
+.venv\Scripts\python rig_check.py latency    # round trip through a loopback cable
+```
+
+## The vinyl archive
+
+`VINYL_ARCHIVE.md` covers recording a record collection through the M2, a
+pipeline to split, tag and sample it, purchased downloads, and a guest mode.
+Phase A1 is built: `.venv\Scripts\python vinyl.py record` records one side to a
+24-bit FLAC master with live meters and a clipping alarm.
+
+## More prototype tools
+
 `.venv\Scripts\python compare_drive.py` (phase 3b) measures the drive's
 aliasing at 1x, 2x and 4x oversampling and writes `drive_comparison.png`.
 
