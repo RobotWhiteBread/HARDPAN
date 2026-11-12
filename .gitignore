@@ -38,3 +38,7 @@ desktop.ini
 # Editors
 .vscode/
 .idea/
+
+# SILT: outside audio stays out of the repository (see SILT.md)
+library/
+exports/
