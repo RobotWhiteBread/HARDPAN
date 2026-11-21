@@ -1,0 +1,5 @@
+# measured data and sample lists stay on this machine
+*.csv
+*.json
+*.log
+galaxy/data/
