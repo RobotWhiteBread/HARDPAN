@@ -1,8 +1,15 @@
 -- HARDPAN_Kit_Builder.lua
--- Turns a kit saved from the Sound Galaxy (hardpan_kit.txt in Downloads) into a
--- 32 bar session: intro, verse, hook, verse, outro, with drums patterned,
--- loops stretched to one tempo, and a starting mix.
+-- Turns a kit (saved from the Sound Galaxy, or written by make_kits.py) into a
+-- 32 bar session: intro, verse, hook, verse, outro, drums patterned in a groove
+-- style, loops stretched to one tempo, and a starting mix.
 -- Run: Actions > New action > Load ReaScript, pick this file, Run.
+--
+-- A kit file may start with header lines:
+--   # title=Machine Tour 1: SP-1200
+--   # style=boombap        (boombap, house, electro, halftime)
+--   # bpm=90
+--   # save=machine1_sp1200
+-- HARDPAN_Build_All_Kits.lua sets HP_KITFILE and HP_BATCH to build many at once.
 
 local R = reaper
 local OUT = [[C:\HARDPAN\studio_setup\projects\]]
@@ -10,37 +17,65 @@ local DL = (os.getenv("USERPROFILE") or [[C:\Users\basch]]) .. [[\Downloads\]]
 
 local function exists(p) local f = io.open(p, "rb"); if f then f:close(); return true end; return false end
 
--- newest kit: hardpan_kit.txt, hardpan_kit (1).txt, (2) ...
-local kitfile = DL .. "hardpan_kit.txt"
-for n = 1, 60 do local p = DL .. "hardpan_kit (" .. n .. ").txt"; if exists(p) then kitfile = p end end
-if R.GetUserFileNameForRead then
-  local ok, pick = R.GetUserFileNameForRead(kitfile, "Pick a Sound Galaxy kit", "txt")
-  if not ok then return end
-  kitfile = pick
+-- which kit ---------------------------------------------------------------
+local kitfile = HP_KITFILE
+if not kitfile then
+  kitfile = DL .. "hardpan_kit.txt"
+  for n = 1, 60 do local p = DL .. "hardpan_kit (" .. n .. ").txt"; if exists(p) then kitfile = p end end
+  if R.GetUserFileNameForRead then
+    local ok, pick = R.GetUserFileNameForRead(kitfile, "Pick a kit", "txt")
+    if not ok then return end
+    kitfile = pick
+  end
 end
-if not exists(kitfile) then R.ShowMessageBox("No kit found in Downloads. Save one from the Sound Galaxy first.", "HARDPAN", 0); return end
+if not exists(kitfile) then
+  if not HP_BATCH then R.ShowMessageBox("No kit found. Save one from the Sound Galaxy first.", "HARDPAN", 0) end
+  HP_RESULT = "no kit file"; return
+end
 
--- read kit
-local kit, missing = {}, {}
-for line in io.lines(kitfile) do
-  local ty, bpm, key, path = line:match("^([^\t]*)\t([^\t]*)\t([^\t]*)\t(.+)$")
-  if ty and ty ~= "type" then
-    path = path:gsub("\r", "")
-    if exists(path) then
-      kit[ty] = kit[ty] or {}
-      table.insert(kit[ty], { path = path, bpm = tonumber(bpm), key = key })
-    else missing[#missing + 1] = path end
+-- read it -----------------------------------------------------------------
+local kit, missing, head = {}, {}, {}
+for raw in io.lines(kitfile) do
+  local line = raw:gsub("\r", "")
+  local hk, hv = line:match("^#%s*(%w+)%s*=%s*(.-)%s*$")
+  if hk then head[hk] = hv
+  else
+    local ty, bpm, key, path = line:match("^([^\t]*)\t([^\t]*)\t([^\t]*)\t(.+)$")
+    if ty and ty ~= "type" then
+      if exists(path) then
+        kit[ty] = kit[ty] or {}
+        table.insert(kit[ty], { path = path, bpm = tonumber(bpm), key = key })
+      else missing[#missing + 1] = path end
+    end
   end
 end
 local function has(t) return kit[t] and #kit[t] > 0 end
-if not next(kit) then R.ShowMessageBox("None of the kit files were found on disk.", "HARDPAN", 0); return end
+if not next(kit) then
+  if not HP_BATCH then R.ShowMessageBox("None of the kit files were found on disk.", "HARDPAN", 0) end
+  HP_RESULT = "no sounds found"; return
+end
 
--- tempo: first loop with a tempo, else 88
-local BPM = 88
-for _, l in ipairs(kit.loop or {}) do if l.bpm and l.bpm >= 60 and l.bpm <= 180 then BPM = l.bpm; break end end
+-- groove styles -------------------------------------------------------------
+-- steps are 16ths in a bar; numbers are velocities
+local STYLES = {
+  boombap  = { bpm = 88,  swing = 0.58, kick = { [0] = 1, [7] = 0.7, [10] = 0.9 }, kick_fill = { [0] = 1, [3] = 0.55, [7] = 0.75, [10] = 0.9 },
+               snare = { [4] = 1, [12] = 1 }, hat = 2, hat_hook = 1, bass = { { 0, 1.5 }, { 10, 1.25 } } },
+  house    = { bpm = 122, swing = 0.54, kick = { [0] = 1, [4] = 1, [8] = 1, [12] = 1 }, kick_fill = { [0] = 1, [4] = 1, [8] = 1, [12] = 1, [14] = 0.6 },
+               snare = { [4] = 0.9, [12] = 0.9 }, hat = "off", hat_hook = 1, bass = { { 2, 0.4 }, { 6, 0.4 }, { 10, 0.4 }, { 14, 0.4 } } },
+  electro  = { bpm = 112, swing = 0.5,  kick = { [0] = 1, [6] = 0.8, [10] = 0.9 }, kick_fill = { [0] = 1, [3] = 0.7, [6] = 0.8, [10] = 0.9, [13] = 0.6 },
+               snare = { [4] = 1, [12] = 1 }, hat = 1, hat_hook = 1, bass = { { 0, 0.4 }, { 3, 0.4 }, { 6, 0.4 }, { 10, 0.6 } } },
+  halftime = { bpm = 140, swing = 0.5,  kick = { [0] = 1, [11] = 0.8 }, kick_fill = { [0] = 1, [7] = 0.6, [11] = 0.8, [14] = 0.7 },
+               snare = { [8] = 1 }, hat = 1, hat_hook = 1, roll = true, bass = { { 0, 2.0 }, { 11, 1.5 } } },
+}
+local ST = STYLES[(head.style or "boombap"):lower()] or STYLES.boombap
+
+-- tempo: header, else first loop with a tempo, else the style's
+local BPM = tonumber(head.bpm)
+if not BPM then for _, l in ipairs(kit.loop or {}) do if l.bpm and l.bpm >= 60 and l.bpm <= 180 then BPM = l.bpm; break end end end
+BPM = BPM or ST.bpm
 local BEAT, BAR, STEP = 60 / BPM, 240 / BPM, 15 / BPM
-local SWING = 0.58     -- 50 = straight, 58 = laid back
-local seed = os.time() % 100000
+local seed = 4242
+for c in kitfile:gmatch(".") do seed = (seed * 31 + c:byte()) % 2147483648 end
 local function rnd() seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648 end
 
 R.Main_OnCommand(40859, 0)            -- new project tab
@@ -73,16 +108,16 @@ local function item(tr, file, pos, len, vol, loop, rate)
   end
   local srclen = R.GetMediaSourceLength(src) / rate
   R.SetMediaItemInfo_Value(it, "D_POSITION", pos)
-  R.SetMediaItemInfo_Value(it, "D_LENGTH", len or srclen)
+  R.SetMediaItemInfo_Value(it, "D_LENGTH", len and math.min(len, loop and len or srclen) or srclen)
   R.SetMediaItemInfo_Value(it, "B_LOOPSRC", loop and 1 or 0)
   R.SetMediaItemInfo_Value(it, "D_VOL", vol or 1)
   R.SetMediaItemInfo_Value(it, "D_FADEINLEN", 0.002)
   R.SetMediaItemInfo_Value(it, "D_FADEOUTLEN", loop and 0.02 or 0.008)
   return srclen
 end
-local function stepTime(bar, step)   -- bar from 1, step 0..15, swing on the off 8ths
-  local t = (bar - 1) * BAR + step * STEP
-  if step % 4 == 2 then t = t + (SWING - 0.5) * 2 * 2 * STEP end
+local function stepTime(bar, st)      -- bar from 1, step 0..15 (fractions allowed), swing on the off 8ths
+  local t = (bar - 1) * BAR + st * STEP
+  if math.floor(st) == st and st % 4 == 2 then t = t + (ST.swing - 0.5) * 4 * STEP end
   return t
 end
 local function pick(t, n) local l = kit[t]; return l[((n - 1) % #l) + 1].path end
@@ -90,38 +125,44 @@ local function pick(t, n) local l = kit[t]; return l[((n - 1) % #l) + 1].path en
 -- sections: {first bar, last bar, name, drums?, energy}
 local SECT = { {1, 4, "Intro", false, 1}, {5, 12, "Verse 1", true, 2}, {13, 20, "Hook", true, 3},
                {21, 28, "Verse 2", true, 2}, {29, 32, "Outro", false, 1} }
+if head.title then R.GetSetProjectNotes(0, true, head.title .. "\n" .. (head.style or "boombap") .. " at " .. BPM .. " BPM") end
 for _, s in ipairs(SECT) do R.AddProjectMarker(0, false, (s[1] - 1) * BAR, 0, s[3], -1) end
 
 -- drums
-local K = { [0] = 1, [7] = 0.7, [10] = 0.85 }          -- boom bap kick
-local K2 = { [0] = 1, [3] = 0.55, [7] = 0.75, [10] = 0.9 }
 if has("kick") then
   local tr = newtrack("Kick", -3)
   for si, s in ipairs(SECT) do if s[4] then
     local f = pick("kick", si)
-    for b = s[1], s[2] do for st, v in pairs((b % 4 == 0) and K2 or K) do item(tr, f, stepTime(b, st), nil, v) end end
+    for b = s[1], s[2] do for st, v in pairs((b % 4 == 0) and ST.kick_fill or ST.kick) do item(tr, f, stepTime(b, st), nil, v) end end
   end end
 end
-local snares = has("snare_clap")
-if snares then
+if has("snare_clap") then
   local tr = newtrack("Snare and clap", -5)
-  for si, s in ipairs(SECT) do if s[4] then
+  for _, s in ipairs(SECT) do if s[4] then
     for b = s[1], s[2] do
-      item(tr, pick("snare_clap", 1), stepTime(b, 4), nil, 1)
-      item(tr, pick("snare_clap", 1), stepTime(b, 12), nil, 1)
-      if s[5] == 3 and #kit.snare_clap > 1 then item(tr, pick("snare_clap", 2), stepTime(b, 12), nil, 0.6) end
-      if b % 2 == 0 and rnd() < 0.5 then item(tr, pick("snare_clap", 1), stepTime(b, 15), nil, 0.25) end  -- ghost
+      for st, v in pairs(ST.snare) do
+        item(tr, pick("snare_clap", 1), stepTime(b, st), nil, v)
+        if s[5] == 3 and #kit.snare_clap > 1 then item(tr, pick("snare_clap", 2), stepTime(b, st), nil, 0.6 * v) end
+      end
+      if ST.swing > 0.52 and b % 2 == 0 and rnd() < 0.5 then item(tr, pick("snare_clap", 1), stepTime(b, 15), nil, 0.25) end  -- ghost
     end
   end end
   lowcut(tr, 120)
 end
 if has("hat") then
   local tr = newtrack("Hats", -12, 0.22)
-  for si, s in ipairs(SECT) do if s[4] then
+  for _, s in ipairs(SECT) do if s[4] then
     for b = s[1], s[2] do
-      for st = 0, 15, (s[5] == 3) and 1 or 2 do
-        local v = (st % 4 == 0) and 0.85 or ((st % 2 == 0) and 0.6 or 0.3)
-        item(tr, pick("hat", (st == 14 and #kit.hat > 1) and 2 or 1), stepTime(b, st), nil, v * (0.85 + 0.3 * rnd()))
+      local every = (s[5] == 3) and ST.hat_hook or ST.hat
+      local steps = {}
+      if every == "off" then steps = { 2, 6, 10, 14 } else for st = 0, 15, every do steps[#steps + 1] = st end end
+      for _, st in ipairs(steps) do
+        local v = (st % 4 == 0) and 0.85 or ((st % 2 == 0) and 0.6 or 0.32)
+        if every == "off" then v = 0.8 end
+        item(tr, pick("hat", (st % 8 == 6 and #kit.hat > 1) and 2 or 1), stepTime(b, st), nil, v * (0.85 + 0.3 * rnd()))
+      end
+      if ST.roll and b % 2 == 0 then          -- triplet roll into the next bar
+        for k = 0, 5 do item(tr, pick("hat", 1), stepTime(b, 14) + k * STEP / 3, nil, 0.35 + 0.08 * k) end
       end
     end
   end end
@@ -129,7 +170,7 @@ if has("hat") then
 end
 if has("perc") then
   local tr = newtrack("Perc", -11, -0.3)
-  for si, s in ipairs(SECT) do if s[4] then
+  for _, s in ipairs(SECT) do if s[4] then
     for b = s[1], s[2] do if s[5] == 3 or b % 2 == 0 then item(tr, pick("perc", b), stepTime(b, 14), nil, 0.8) end end
   end end
   lowcut(tr, 200)
@@ -142,8 +183,10 @@ if has("loop") then
     local tr = newtrack("Loop " .. li, li == 1 and -8 or -12, (li == 2 and -0.35) or (li == 3 and 0.35) or 0)
     local src = R.PCM_Source_CreateFromFile(l.path)
     local len = R.GetMediaSourceLength(src)
-    local rate = 1
-    if l.bpm and l.bpm >= 60 then rate = BPM / l.bpm
+    local rate
+    if l.bpm and l.bpm >= 60 then
+      rate = BPM / l.bpm
+      if rate < 0.6 then rate = rate * 2 elseif rate > 1.7 then rate = rate / 2 end
     else local bars = math.max(1, math.floor(len / BAR + 0.5)); rate = len / (bars * BAR) end
     for _, s in ipairs(SECT) do
       if li == 1 or s[5] >= 2 then item(tr, l.path, (s[1] - 1) * BAR, (s[2] - s[1] + 1) * BAR, 1, true, rate) end
@@ -157,8 +200,9 @@ if has("bass") then
   local tr = newtrack("Bass", -6)
   for _, s in ipairs(SECT) do if s[4] then
     for b = s[1], s[2] do
-      item(tr, pick("bass", 1), stepTime(b, 0), 1.5 * BEAT, 1)
-      item(tr, pick("bass", (#kit.bass > 1) and 2 or 1), stepTime(b, 10), 1.25 * BEAT, 0.8)
+      for n, hit in ipairs(ST.bass) do
+        item(tr, pick("bass", (n % 2 == 0 and #kit.bass > 1) and 2 or 1), stepTime(b, hit[1]), hit[2] * BEAT, n == 1 and 1 or 0.8)
+      end
     end
   end end
 end
@@ -178,7 +222,7 @@ if has("fx_noise") then
   lowcut(tr, 200)
 end
 
--- record-ready tracks for you
+-- record-ready track for you
 local keys = newtrack("Keys (you)", -8)
 R.SetMediaTrackInfo_Value(keys, "I_RECINPUT", 4096 + 63 * 32)
 R.SetMediaTrackInfo_Value(keys, "I_RECMON", 1)
@@ -190,8 +234,12 @@ R.GetSetRepeat(1)
 R.SetEditCurPos(0, true, false)
 R.UpdateArrange()
 
-local name = "galaxy_kit_" .. os.date("%m%d_%H%M") .. ".rpp"
+local name = (head.save or ("galaxy_kit_" .. os.date("%m%d_%H%M"))) .. ".rpp"
 if R.Main_SaveProjectEx then R.Main_SaveProjectEx(0, OUT .. name, 0) end
-local msg = string.format("Built at %d BPM from %s\nSaved as %s\nPress SPACE to play.", math.floor(BPM + 0.5), kitfile:match("([^\\]+)$"), name)
-if #missing > 0 then msg = msg .. "\n\n" .. #missing .. " kit file(s) not found on disk." end
-R.ShowMessageBox(msg, "HARDPAN Kit Builder", 0)
+HP_RESULT = string.format("%s: %s at %d BPM", name, head.style or "boombap", math.floor(BPM + 0.5))
+if not HP_BATCH then
+  local msg = string.format("Built %s at %d BPM from %s\nSaved as %s\nPress SPACE to play.",
+    head.style or "boombap", math.floor(BPM + 0.5), kitfile:match("([^\\/]+)$"), name)
+  if #missing > 0 then msg = msg .. "\n\n" .. #missing .. " kit file(s) not found on disk." end
+  R.ShowMessageBox(msg, "HARDPAN Kit Builder", 0)
+end

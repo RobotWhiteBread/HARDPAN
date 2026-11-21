@@ -7,7 +7,10 @@ build tracks in REAPER, and check mixes.
 |---|---|---|
 | Analyzer | Measures every sample: tempo, key, note, brightness, punch, low end, stereo width, noise, a sound-type guess and character tags. Resumable. | `Run-SampleAnalysis.ps1` (`-Test` for 300 files) |
 | Sound Galaxy | Every sample as a point in 3D. Similarity islands with names ("lofi dark loops"), or pick your own axes. Hover to hear and see the waveform; click for a web to the 14 closest sounds, Drift to wander sound to sound, Match key and tempo, and Build a kit around this. Pack names, one-of-each to hide the extra copies, and Gaps to show the kinds of sounds you do not have yet. Save a kit for REAPER. | `galaxy\Open-Galaxy.ps1` (add `-Waveforms` the first time) |
-| Kit Builder | Turns a saved Galaxy kit into a 32 bar REAPER session: intro, verses, hook, outro, drums patterned with swing, loops stretched to one tempo, a starting mix. | REAPER: Actions > Load ReaScript > `reaper\HARDPAN_Kit_Builder.lua` |
+| Kit Builder | Turns a kit into a 32 bar REAPER session in one of four grooves (boombap, house, electro, halftime): intro, verses, hook, outro, loops stretched to one tempo, a starting mix. | REAPER: `reaper\HARDPAN_Kit_Builder.lua` |
+| Machine Tour | Eight new songs, one per classic drum machine (SP-1200, MPC60, LinnDrum, 909, 808, DMX, CR-78, Drumulator), with a melodic loop near the tempo and bass and keys in its key. | `reaper\Make-New-Tracks.ps1`, then REAPER: `HARDPAN_Build_All_Kits.lua` |
+| Mars Remixes | Copies of your songs with the drums rebuilt from Samples From Mars: hits matched by sound, breaks swapped for Mars loops near the same tempo with every chop re-timed. Originals untouched. | `reaper\Make-New-Tracks.ps1` |
+| Project Upgrade | Adds two library alternatives to every sample in a song as extra takes (press T to flip). | REAPER: `reaper\HARDPAN_Upgrade_Project.lua` |
 | Mix Check | Report page with a spinnable 3D spectrogram, loudness (BS.1770), true peak, punch, loudness range, low end in mono, stereo width, tonal balance and kick and bass clash. | `mixmath\Check-Mix.ps1 song.wav` |
 
 ## Flow
