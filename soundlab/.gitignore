@@ -3,3 +3,5 @@
 *.json
 *.log
 galaxy/data/
+refs/
+*_mixcheck.html

@@ -1,0 +1,571 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>HARDPAN Sound Galaxy</title>
+<style>
+  :root { --bg:#07090d; --panel:rgba(14,18,26,.9); --line:#232b38; --text:#d9e1ec; --dim:#7c8798; --accent:#f2a93b; --good:#4ef0b0; }
+  * { box-sizing:border-box; }
+  html,body { margin:0; height:100%; background:var(--bg); color:var(--text); font:13px/1.4 system-ui,Segoe UI,sans-serif; overflow:hidden; }
+  #c { position:fixed; inset:0; }
+  .panel { position:fixed; background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:12px; backdrop-filter:blur(6px); }
+  #left { top:12px; left:12px; width:262px; max-height:calc(100% - 24px); overflow:auto; }
+  #right { top:12px; right:12px; width:340px; max-height:calc(100% - 24px); overflow:auto; display:none; }
+  #kitbox { bottom:12px; right:364px; width:300px; max-height:45%; overflow:auto; display:none; }
+  #tip { position:fixed; pointer-events:none; background:#000d; border:1px solid var(--line); padding:6px 8px; border-radius:6px; font-size:12px; display:none; max-width:420px; }
+  #tip canvas { display:block; margin-top:4px; }
+  #status { position:fixed; bottom:12px; left:12px; color:var(--dim); font-size:12px; }
+  h1 { font-size:15px; margin:0 0 2px; letter-spacing:.08em; }
+  h2 { font-size:11.5px; margin:14px 0 6px; color:var(--dim); text-transform:uppercase; letter-spacing:.08em; }
+  label.row { display:flex; justify-content:space-between; align-items:center; gap:8px; margin:4px 0; }
+  select,input[type=text] { background:#0b0f16; color:var(--text); border:1px solid var(--line); border-radius:6px; padding:4px 6px; width:150px; }
+  input[type=text] { width:100%; }
+  .types label { display:flex; align-items:center; gap:6px; margin:2px 0; cursor:pointer; }
+  .sw { width:10px; height:10px; border-radius:50%; display:inline-block; flex:none; }
+  .count { margin-left:auto; color:var(--dim); font-size:11px; }
+  button { background:#1a2230; color:var(--text); border:1px solid var(--line); border-radius:6px; padding:5px 9px; cursor:pointer; }
+  button:hover { border-color:var(--accent); }
+  button.on { border-color:var(--accent); color:var(--accent); }
+  button.primary { background:var(--accent); color:#111; border-color:var(--accent); font-weight:600; }
+  .name { font-size:14px; font-weight:600; word-break:break-word; }
+  .meta { color:var(--dim); margin:4px 0 6px; word-break:break-word; }
+  .tags span { display:inline-block; background:#1a2230; border-radius:10px; padding:1px 8px; margin:2px 3px 2px 0; font-size:11px; }
+  .bars div { display:flex; align-items:center; gap:6px; font-size:11px; color:var(--dim); margin:2px 0; }
+  .bars i { flex:1; height:5px; background:#1a2230; border-radius:3px; position:relative; }
+  .bars i b { position:absolute; left:0; top:0; bottom:0; background:var(--accent); border-radius:3px; }
+  .list div { padding:4px 6px; border-radius:6px; cursor:pointer; display:flex; gap:6px; align-items:center; }
+  .list div:hover { background:#1a2230; }
+  .list small { color:var(--dim); margin-left:auto; white-space:nowrap; }
+  .list em { color:var(--accent); font-style:normal; font-size:11px; width:62px; flex:none; }
+  .btns { display:flex; gap:6px; flex-wrap:wrap; margin:8px 0; }
+  .hint { color:var(--dim); font-size:11px; margin-top:8px; }
+  .note { color:var(--dim); font-size:12px; margin:6px 0; }
+  .gap { font-size:12px; margin:3px 0; color:var(--text); }
+  .gap small { color:var(--dim); }
+  #wave { width:100%; height:44px; display:block; margin:6px 0; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<div id="left" class="panel">
+  <h1>HARDPAN SOUND GALAXY</h1>
+  <div class="hint" id="total" style="margin-top:0"></div>
+
+  <h2>Map</h2>
+  <label class="row">Layout <select id="layoutMode"><option value="sim">Similarity islands</option><option value="axes">Choose the axes</option></select></label>
+  <div id="axesBox" style="display:none">
+    <label class="row">Left / right <select id="ax"></select></label>
+    <label class="row">Up / down <select id="ay"></select></label>
+    <label class="row">Near / far <select id="az"></select></label>
+  </div>
+  <label class="row">Color by
+    <select id="colorBy"><option value="type">Sound type</option><option value="key">Key</option><option value="pack">Pack</option><option value="tempo">Tempo</option><option value="island">Island</option></select>
+  </label>
+  <label class="row">Dot size <input type="range" id="size" min="1" max="12" value="4" style="width:150px"></label>
+  <label class="row">Island names <input type="checkbox" id="islandNames" checked></label>
+  <label class="row">Pack names <input type="checkbox" id="packNames"></label>
+  <label class="row">One of each (hide copies) <input type="checkbox" id="oneEach"></label>
+  <label class="row">Play on hover <input type="checkbox" id="hoverPlay" checked></label>
+
+  <h2>Find</h2>
+  <input type="text" id="search" placeholder="name or pack, e.g. sp1200 kick">
+  <label class="row" style="margin-top:6px">Pack <select id="packFilter"><option value="">all packs</option></select></label>
+  <label class="row">Key <select id="keyFilter"><option value="">any</option></select></label>
+  <label class="row">Tempo <span><input type="text" id="bpmLo" placeholder="min" style="width:52px"> to <input type="text" id="bpmHi" placeholder="max" style="width:52px"></span></label>
+
+  <h2>Sound types</h2>
+  <div class="types" id="types"></div>
+  <div class="btns"><button id="allTypes">All</button><button id="noTypes">None</button></div>
+
+  <h2>Gaps in your collection</h2>
+  <label class="row">Look at <select id="gapType"><option value="">pick a type</option></select></label>
+  <div id="gaps"></div>
+
+  <div class="hint">Drag to orbit, scroll to zoom, right-drag to pan. Hover to hear. Click a dot for its closest matches. Esc clears, Space plays or stops.</div>
+</div>
+
+<div id="right" class="panel">
+  <div class="name" id="selName"></div>
+  <div class="meta" id="selMeta"></div>
+  <canvas id="wave"></canvas>
+  <div class="tags" id="selTags"></div>
+  <div class="note" id="selIsland"></div>
+  <div class="note" id="selDups"></div>
+  <div class="bars" id="selBars"></div>
+  <div class="btns">
+    <button class="primary" id="playBtn">Play</button>
+    <button id="kitBtn">Add to kit</button>
+    <button id="driftBtn">Drift</button>
+    <button id="matchBtn">Match key and tempo</button>
+    <button id="fillBtn">Build a kit around this</button>
+    <button id="copyBtn">Copy path</button>
+  </div>
+  <div id="fillBox" style="display:none">
+    <h2>Suggested kit</h2>
+    <div class="list" id="fill"></div>
+    <div class="btns"><button class="primary" id="fillAdd">Add all to kit</button><button id="fillRoll">Reroll</button></div>
+  </div>
+  <h2>Sounds like this <label style="text-transform:none;letter-spacing:0;float:right;font-weight:400"><input type="checkbox" id="sameType" checked> same type</label></h2>
+  <div class="list" id="nbrs"></div>
+</div>
+
+<div id="kitbox" class="panel">
+  <h2 style="margin-top:0">Kit <span id="kitCount"></span></h2>
+  <div class="list" id="kit"></div>
+  <div class="btns"><button class="primary" id="saveKit">Save kit</button><button id="clearKit">Clear</button></div>
+  <div class="hint">Saves hardpan_kit.txt to Downloads. Then run HARDPAN_Kit_Builder.lua in REAPER.</div>
+</div>
+
+<div id="tip"></div>
+<div id="status">Loading sounds...</div>
+
+<script src="data/galaxy_data.js"></script>
+<script src="data/galaxy_thumbs.js" onerror="window.THUMBS=null"></script>
+<script type="importmap">
+{ "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+               "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/" } }
+</script>
+<script type="module">
+import * as THREE from "three";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+
+const G = window.GALAXY, TH = window.THUMBS || null;
+const $ = id => document.getElementById(id);
+if (!G) { $("status").textContent = "No data. Run Open-Galaxy.ps1 first."; throw new Error("no data"); }
+const N = G.count;
+const featKeys = Object.keys(G.featLabels), vibeKeys = featKeys.filter(f => f !== "tempo");
+const TYPE_LABEL = { kick:"Kicks", snare_clap:"Snares and claps", hat:"Hats", perc:"Perc", bass:"Bass",
+  melodic:"Melodic", loop:"Loops", texture:"Texture", fx_noise:"FX and noise", other:"Other" };
+const TYPE_COLOR = { kick:"#ff5a4e", snare_clap:"#ffb347", hat:"#fff27a", perc:"#c58bff", bass:"#4ea8ff",
+  melodic:"#4ef0b0", loop:"#ff7bd5", texture:"#8fa3b8", fx_noise:"#7ee0ff", other:"#666" };
+const tIdx = name => G.types.indexOf(name);
+const typeName = i => G.types[G.t[i]];
+const short = p => p.split("|").pop().trim();
+
+// ---------- scene ----------
+const renderer = new THREE.WebGLRenderer({ canvas:$("c"), antialias:true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+const scene = new THREE.Scene();
+scene.fog = new THREE.FogExp2(0x07090d, 0.002);
+const camera = new THREE.PerspectiveCamera(55, 1, 0.1, 5000);
+camera.position.set(190, 120, 230);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true; controls.autoRotate = true; controls.autoRotateSpeed = 0.25;
+renderer.domElement.addEventListener("pointerdown", () => controls.autoRotate = false);
+const box = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(220,220,220)), new THREE.LineBasicMaterial({ color:0x1c2533 }));
+scene.add(box);
+
+const pos = new Float32Array(N*3), target = new Float32Array(N*3), start = new Float32Array(N*3), col = new Float32Array(N*3), vis = new Float32Array(N);
+const jit = new Float32Array(N*3);
+for (let i = 0; i < N*3; i++) { const s = Math.sin(i*12.9898)*43758.5453; jit[i] = (s - Math.floor(s) - .5) * 0.9; }
+const geo = new THREE.BufferGeometry();
+geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+geo.setAttribute("color", new THREE.BufferAttribute(col, 3));
+geo.setAttribute("vis", new THREE.BufferAttribute(vis, 1));
+const mat = new THREE.ShaderMaterial({
+  uniforms:{ size:{ value:4 }, scale:{ value:innerHeight/2 } },
+  vertexShader:`attribute float vis; attribute vec3 color; varying vec3 vC; varying float vV; uniform float size; uniform float scale;
+    void main(){ vC=color; vV=vis; vec4 mv=modelViewMatrix*vec4(position,1.); gl_PointSize = vis<=0.? 0. : size*vis*scale/(-mv.z)*0.25; gl_Position=projectionMatrix*mv; }`,
+  fragmentShader:`varying vec3 vC; varying float vV; void main(){ vec2 d=gl_PointCoord-.5; float r=length(d); if(r>.5||vV<=0.) discard;
+    float a = smoothstep(.5,.15,r); gl_FragColor=vec4(vC*(vV>1.5?1.6:1.),a*(vV<0.6?.22:.9)); }`,
+  transparent:true, depthWrite:false, blending:THREE.AdditiveBlending });
+scene.add(new THREE.Points(geo, mat));
+
+const ring = new THREE.Mesh(new THREE.RingGeometry(2.2, 2.8, 32), new THREE.MeshBasicMaterial({ color:0xf2a93b, side:THREE.DoubleSide }));
+ring.visible = false; scene.add(ring);
+const webGeo = new THREE.BufferGeometry(); webGeo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(16*6), 3));
+const web = new THREE.LineSegments(webGeo, new THREE.LineBasicMaterial({ color:0xf2a93b, transparent:true, opacity:.55 }));
+web.visible = false; scene.add(web);
+const gapGroup = new THREE.Group(); scene.add(gapGroup);
+
+// ---------- text labels ----------
+function makeLabel(text, color = "#c9d3e0", px = 26) {
+  const cv = document.createElement("canvas"), g = cv.getContext("2d");
+  g.font = `600 ${px}px system-ui`; const w = Math.ceil(g.measureText(text).width) + 16;
+  cv.width = w; cv.height = px + 14; g.font = `600 ${px}px system-ui`;
+  g.fillStyle = "rgba(7,9,13,.6)"; g.fillRect(0, 0, w, cv.height);
+  g.fillStyle = color; g.fillText(text, 8, px);
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map:new THREE.CanvasTexture(cv), transparent:true, depthTest:false }));
+  s.scale.set(w / 9, cv.height / 9, 1); s.renderOrder = 5; return s;
+}
+const islandLabels = new THREE.Group(), packLabels = new THREE.Group(); scene.add(islandLabels, packLabels);
+
+// ---------- left panel ----------
+for (const id of ["ax","ay","az"]) for (const k of featKeys) $(id).add(new Option(G.featLabels[k], k));
+$("ax").value = "bright"; $("ay").value = "punch"; $("az").value = "body";
+for (let i = 0; i < 24; i++) $("keyFilter").add(new Option(G.keys[i], i));
+G.packs.map((p, i) => [short(p), i]).sort((a, b) => a[0].localeCompare(b[0])).forEach(([p, i]) => $("packFilter").add(new Option(p, i)));
+const dupFirst = new Map(), dupCount = new Map();
+for (let i = 0; i < N; i++) { const d = G.dup[i]; if (d < 0) continue; if (!dupFirst.has(d)) dupFirst.set(d, i); dupCount.set(d, (dupCount.get(d) || 0) + 1); }
+const extra = [...dupCount.values()].reduce((a, b) => a + b - 1, 0);
+$("total").textContent = `${N.toLocaleString()} sounds, ${G.packs.length} packs, ${G.clusters.filter(c => c.n).length} islands, ${extra.toLocaleString()} extra copies`;
+
+const typeOn = G.types.map(() => true);
+const typeCounts = G.types.map(() => 0); for (let i = 0; i < N; i++) typeCounts[G.t[i]]++;
+const order = G.types.map((t, i) => i).sort((a, b) => typeCounts[b] - typeCounts[a]);
+for (const ti of order) {
+  const t = G.types[ti], l = document.createElement("label");
+  l.innerHTML = `<input type="checkbox" checked><span class="sw" style="background:${TYPE_COLOR[t]||"#888"}"></span>${TYPE_LABEL[t]||t}<span class="count">${typeCounts[ti].toLocaleString()}</span>`;
+  l.querySelector("input").onchange = e => { typeOn[ti] = e.target.checked; applyFilter(); };
+  $("types").appendChild(l);
+  $("gapType").add(new Option(TYPE_LABEL[t] || t, ti));
+}
+$("allTypes").onclick = () => setAllTypes(true); $("noTypes").onclick = () => setAllTypes(false);
+function setAllTypes(v) { typeOn.fill(v); $("types").querySelectorAll("input").forEach(c => c.checked = v); applyFilter(); }
+
+// ---------- layout ----------
+let tween = 1;
+function layout(animate = true) {
+  start.set(pos);
+  if ($("layoutMode").value === "sim") {
+    for (let i = 0; i < N; i++) { target[i*3] = G.sx[i]/10; target[i*3+1] = G.sy[i]/10; target[i*3+2] = G.sz[i]/10; }
+  } else {
+    const fx = G.feats[$("ax").value], fy = G.feats[$("ay").value], fz = G.feats[$("az").value];
+    for (let i = 0; i < N; i++) {
+      target[i*3] = (fx[i]/255 - .5)*220 + jit[i*3]; target[i*3+1] = (fy[i]/255 - .5)*220 + jit[i*3+1]; target[i*3+2] = (fz[i]/255 - .5)*220 + jit[i*3+2];
+    }
+  }
+  if (!animate) { pos.set(target); geo.attributes.position.needsUpdate = true; afterMove(); } else tween = 0;
+}
+$("layoutMode").onchange = () => { $("axesBox").style.display = $("layoutMode").value === "axes" ? "block" : "none"; layout(); };
+["ax","ay","az"].forEach(id => $(id).onchange = () => layout());
+
+function afterMove() {
+  // island labels follow their sounds; only the bigger islands get a name so the sky stays readable
+  islandLabels.clear();
+  if ($("islandNames").checked && $("layoutMode").value === "sim") {
+    const big = G.clusters.map((c, i) => [c, i]).filter(([c]) => c.n >= 250).sort((a, b) => b[0].n - a[0].n).slice(0, 70);
+    for (const [c] of big) { const s = makeLabel(c.label, "#c9d3e0", 22); s.position.set(c.x, c.y + 4, c.z); islandLabels.add(s); }
+  }
+  packLabels.clear();
+  if ($("packNames").checked) {
+    const acc = G.packs.map(() => [0, 0, 0, 0]);
+    for (let i = 0; i < N; i++) { const a = acc[G.p[i]]; a[0] += pos[i*3]; a[1] += pos[i*3+1]; a[2] += pos[i*3+2]; a[3]++; }
+    acc.forEach((a, p) => { if (a[3] < 40) return; const c = new THREE.Color().setHSL((p*0.61803398875)%1, .7, .65);
+      const s = makeLabel(short(G.packs[p]), "#" + c.getHexString(), 20); s.position.set(a[0]/a[3], a[1]/a[3], a[2]/a[3]); packLabels.add(s); });
+  }
+  if (sel >= 0) { ring.position.set(pos[sel*3], pos[sel*3+1], pos[sel*3+2]); drawWeb(); }
+  drawGaps();
+}
+$("islandNames").onchange = afterMove; $("packNames").onchange = afterMove;
+
+function hsl(h, s, l) { return new THREE.Color().setHSL(h, s, l); }
+function colorize() {
+  const mode = $("colorBy").value, tc = G.types.map(t => new THREE.Color(TYPE_COLOR[t] || "#888"));
+  const fifths = [0,7,2,9,4,11,6,1,8,3,10,5];
+  for (let i = 0; i < N; i++) {
+    let c;
+    if (mode === "type") c = tc[G.t[i]];
+    else if (mode === "key") { const k = G.key[i]; c = k < 0 ? hsl(0,0,.25) : hsl(fifths.indexOf(k%12)/12, k>=12?.55:.85, k>=12?.5:.6); }
+    else if (mode === "pack") c = hsl((G.p[i]*0.61803398875)%1, .7, .58);
+    else if (mode === "island") c = hsl((G.cl[i]*0.61803398875)%1, .75, .58);
+    else { const b = G.bpm[i]; c = b ? hsl(.66 - Math.min(Math.max((b-60)/120,0),1)*.66, .85, .55) : hsl(0,0,.22); }
+    col[i*3] = c.r; col[i*3+1] = c.g; col[i*3+2] = c.b;
+  }
+  geo.attributes.color.needsUpdate = true;
+}
+$("colorBy").onchange = colorize;
+$("size").oninput = e => mat.uniforms.size.value = +e.target.value;
+
+// ---------- key and tempo rules ----------
+function keyCompat(a, b) {                       // same key, relative major/minor, or a fifth away
+  if (a < 0 || b < 0) return false;
+  const am = a >= 12, bm = b >= 12, ar = a % 12, br = b % 12;
+  if (am === bm) return ar === br || (ar + 7) % 12 === br || (br + 7) % 12 === ar;
+  const relMajor = am ? (ar + 3) % 12 : ar, otherMajor = bm ? (br + 3) % 12 : br;
+  return relMajor === otherMajor;
+}
+function tempoCompat(a, b) {
+  if (!a || !b) return false;
+  for (const m of [1, 2, 0.5]) if (Math.abs(a * m - b) / b <= 0.06) return true;
+  return false;
+}
+
+// ---------- filter ----------
+let highlight = new Set(), matchOn = false;
+function applyFilter() {
+  const q = $("search").value.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const kf = $("keyFilter").value === "" ? -1 : +$("keyFilter").value;
+  const pf = $("packFilter").value === "" ? -1 : +$("packFilter").value;
+  const lo = parseFloat($("bpmLo").value) || 0, hi = parseFloat($("bpmHi").value) || 999, tempoOn = $("bpmLo").value || $("bpmHi").value;
+  const one = $("oneEach").checked, packLow = q.length ? G.packs.map(p => p.toLowerCase()) : null;
+  const sk = sel >= 0 ? G.key[sel] : -1, sb = sel >= 0 ? G.bpm[sel] : 0;
+  let shown = 0;
+  for (let i = 0; i < N; i++) {
+    let v = typeOn[G.t[i]] ? 1 : 0;
+    if (v && one && G.dup[i] >= 0 && dupFirst.get(G.dup[i]) !== i) v = 0;
+    if (v && pf >= 0 && G.p[i] !== pf) v = 0;
+    if (v && kf >= 0 && G.key[i] !== kf) v = 0;
+    if (v && tempoOn && !(G.bpm[i] >= lo && G.bpm[i] <= hi)) v = 0;
+    if (v && q.length) {
+      const hay = (G.n[i] + " " + packLow[G.p[i]] + " " + G.dirs[G.d[i]]).toLowerCase();
+      if (!q.every(w => hay.includes(w))) v = 0.35;
+    }
+    if (v >= 1 && matchOn && sel >= 0) {
+      const kOk = sk < 0 || keyCompat(sk, G.key[i]), tOk = !sb || tempoCompat(sb, G.bpm[i]);
+      if (!(kOk && tOk)) v = 0.35;
+    }
+    if (highlight.has(i)) v = 2.6;
+    vis[i] = v; if (v >= 1) shown++;
+  }
+  geo.attributes.vis.needsUpdate = true;
+  $("status").textContent = `${shown.toLocaleString()} sounds showing` + (matchOn && sel >= 0 ? " that match the key and tempo" : "");
+}
+let ft; for (const id of ["search","bpmLo","bpmHi"]) $(id).oninput = () => { clearTimeout(ft); ft = setTimeout(applyFilter, 250); };
+for (const id of ["keyFilter","packFilter","oneEach"]) $(id).onchange = applyFilter;
+
+// ---------- gaps ----------
+const LEVEL = ["very low", "low", "medium-low", "medium-high", "high", "very high"];
+function drawGaps() {
+  gapGroup.clear(); $("gaps").innerHTML = "";
+  const ti = $("gapType").value; if (ti === "") return;
+  if ($("layoutMode").value !== "axes") { $("gaps").innerHTML = `<div class="note">Gaps show on "Choose the axes" layout. Switching...</div>`; $("layoutMode").value = "axes"; $("layoutMode").onchange(); return; }
+  const B = 6, ks = [$("ax").value, $("ay").value, $("az").value], F = ks.map(k => G.feats[k]);
+  const occ = new Int32Array(B*B*B), all = new Int32Array(B*B*B);
+  const bin = v => Math.min(B - 1, Math.floor(v / 256 * B));
+  for (let i = 0; i < N; i++) {
+    const c = bin(F[0][i]) + B*bin(F[1][i]) + B*B*bin(F[2][i]); all[c]++;
+    if (G.t[i] === +ti) occ[c]++;
+  }
+  const gaps = [];
+  for (let z = 0; z < B; z++) for (let y = 0; y < B; y++) for (let x = 0; x < B; x++) {
+    const c = x + B*y + B*B*z; if (occ[c] > 2 || all[c] < 25) continue;   // a gap: the library has sounds here, but not this type
+    let around = 0;
+    for (const [dx, dy, dz] of [[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]]) {
+      const X = x+dx, Y = y+dy, Z = z+dz; if (X<0||Y<0||Z<0||X>=B||Y>=B||Z>=B) continue; around += occ[X + B*Y + B*B*Z];
+    }
+    if (around > 0) gaps.push({ x, y, z, around, have: occ[c] });
+  }
+  gaps.sort((a, b) => b.around - a.around);
+  const cell = 220 / B, color = new THREE.Color(TYPE_COLOR[G.types[ti]] || "#888");
+  for (const g of gaps.slice(0, 12)) {
+    const m = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(cell*.92, cell*.92, cell*.92)), new THREE.LineBasicMaterial({ color, transparent:true, opacity:.7 }));
+    m.position.set((g.x + .5)*cell - 110, (g.y + .5)*cell - 110, (g.z + .5)*cell - 110); gapGroup.add(m);
+  }
+  const lbl = ks.map(k => G.featLabels[k].toLowerCase());
+  $("gaps").innerHTML = gaps.length ? gaps.slice(0, 6).map(g => `<div class="gap">${LEVEL[g.x]} ${lbl[0]}, ${LEVEL[g.y]} ${lbl[1]}, ${LEVEL[g.z]} ${lbl[2]} <small>(${g.have} here, ${g.around} next door)</small></div>`).join("")
+    + `<div class="hint">Boxes in the map mark these spots. Change the axes to look for other kinds of gaps.</div>`
+    : `<div class="note">No real gaps on these axes. Try other axes.</div>`;
+}
+$("gapType").onchange = drawGaps;
+
+// ---------- picking ----------
+function pick(cx, cy, radius = 9) {
+  const w = innerWidth, h = innerHeight, m = new THREE.Matrix4().multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+  const e = m.elements; let best = -1, bd = radius*radius;
+  for (let i = 0; i < N; i++) {
+    if (vis[i] < 0.9) continue;
+    const x = pos[i*3], y = pos[i*3+1], z = pos[i*3+2];
+    const cw = e[3]*x + e[7]*y + e[11]*z + e[15]; if (cw <= 0) continue;
+    const sx = ((e[0]*x + e[4]*y + e[8]*z + e[12])/cw*.5+.5)*w, sy = (1-((e[1]*x + e[5]*y + e[9]*z + e[13])/cw*.5+.5))*h;
+    const d = (sx-cx)**2 + (sy-cy)**2; if (d < bd) { bd = d; best = i; }
+  }
+  return best;
+}
+
+// ---------- audio ----------
+const audio = new Audio();
+const pathOf = i => G.dirs[G.d[i]] + "\\" + G.n[i];
+const urlOf = i => "file:///" + encodeURI(pathOf(i).replace(/\\/g, "/")).replace(/#/g, "%23").replace(/\?/g, "%3F");
+function play(i) { audio.pause(); audio.src = urlOf(i); audio.currentTime = 0; audio.play().catch(() => {}); }
+
+// ---------- waveform ----------
+function drawWave(cv, i, w, h) {
+  if (!TH) return false;
+  const g = cv.getContext("2d"); cv.width = w * devicePixelRatio; cv.height = h * devicePixelRatio; g.scale(devicePixelRatio, devicePixelRatio);
+  g.clearRect(0, 0, w, h); g.fillStyle = TYPE_COLOR[typeName(i)] || "#888";
+  const o = i * 64, bw = w / 32;
+  for (let k = 0; k < 32; k++) { const v = parseInt(TH.substr(o + k*2, 2), 16) / 255, bh = Math.max(1, v * (h - 2)); g.fillRect(k*bw + .5, (h - bh)/2, bw - 1, bh); }
+  return true;
+}
+
+// ---------- selection ----------
+let sel = -1, nb = [];
+const KEYN = k => k < 0 ? "" : G.keys[k];
+function describe(i) {
+  const bits = [TYPE_LABEL[typeName(i)] || typeName(i)];
+  if (G.bpm[i]) bits.push(G.bpm[i] + " BPM" + (G.bars[i] ? `, ${G.bars[i]} bar${G.bars[i] > 1 ? "s" : ""}` : ""));
+  if (G.key[i] >= 0) bits.push(KEYN(G.key[i]));
+  if (G.notes[G.note[i]]) bits.push("note " + G.notes[G.note[i]]);
+  return bits.join(" · ");
+}
+function vibeDist(i, j, keys = vibeKeys) { let d = 0; for (const k of keys) { const x = G.feats[k][i] - G.feats[k][j]; d += x*x; } return d; }
+function neighbors(i, k = 14) {
+  const same = $("sameType").checked, one = $("oneEach").checked, heap = [];
+  for (let j = 0; j < N; j++) {
+    if (j === i || (same && G.t[j] !== G.t[i])) continue;
+    if (G.dup[i] >= 0 && G.dup[j] === G.dup[i]) continue;               // a copy is not a neighbor
+    if (one && G.dup[j] >= 0 && dupFirst.get(G.dup[j]) !== j) continue;
+    let d = vibeDist(i, j);
+    if (G.bpm[i] && G.bpm[j]) { const x = (G.bpm[i] - G.bpm[j]) * 2; d += x*x; }
+    if (heap.length < k) { heap.push([d, j]); heap.sort((a,b)=>a[0]-b[0]); }
+    else if (d < heap[k-1][0]) { heap[k-1] = [d, j]; heap.sort((a,b)=>a[0]-b[0]); }
+  }
+  return heap.map(h => h[1]);
+}
+function drawWeb() {
+  const a = webGeo.attributes.position.array; a.fill(0);
+  nb.slice(0, 16).forEach((j, n) => { a.set([pos[sel*3], pos[sel*3+1], pos[sel*3+2], pos[j*3], pos[j*3+1], pos[j*3+2]], n*6); });
+  webGeo.attributes.position.needsUpdate = true; webGeo.setDrawRange(0, nb.length * 2); web.visible = sel >= 0;
+}
+function row(j, tag) {
+  const d = document.createElement("div");
+  d.innerHTML = `${tag ? `<em>${tag}</em>` : ""}<span class="sw" style="background:${TYPE_COLOR[typeName(j)]||"#888"}"></span>${G.n[j]}<small>${short(G.packs[G.p[j]]).slice(0,20)}</small>`;
+  d.onclick = () => { select(j); flyTo(j); }; d.onmouseenter = () => play(j);
+  return d;
+}
+function select(i, autoplay = true) {
+  sel = i; $("fillBox").style.display = "none";
+  if (i < 0) { $("right").style.display = "none"; ring.visible = false; web.visible = false; highlight.clear(); nb = []; stopDrift(); applyFilter(); return; }
+  $("right").style.display = "block";
+  $("selName").textContent = G.n[i];
+  $("selMeta").textContent = short(G.packs[G.p[i]]) + "  ·  " + describe(i);
+  $("wave").style.display = drawWave($("wave"), i, $("wave").clientWidth || 310, 44) ? "block" : "none";
+  $("selTags").innerHTML = (G.chars[G.ch[i]] || "").split(" ").filter(Boolean).map(t => `<span>${t}</span>`).join("");
+  const c = G.clusters[G.cl[i]];
+  $("selIsland").innerHTML = `Island: <b>${c.label}</b> (${c.n.toLocaleString()} sounds, mostly ${c.packs.map(p => p[0]).slice(0, 2).join(" and ")})`;
+  if (G.dup[i] >= 0) {
+    const copies = []; for (let j = 0; j < N; j++) if (j !== i && G.dup[j] === G.dup[i]) copies.push(j);
+    const where = [...new Set(copies.map(j => short(G.packs[G.p[j]]) + " / " + G.dirs[G.d[j]].split("\\").slice(-1)[0]))].slice(0, 3);
+    $("selDups").innerHTML = `Same sound also at ${copies.length} other spot${copies.length > 1 ? "s" : ""}: ${where.join("; ")}`;
+  } else $("selDups").innerHTML = "";
+  $("selBars").innerHTML = vibeKeys.map(f => `<div><span style="width:110px">${G.featLabels[f]}</span><i><b style="width:${G.feats[f][i]/2.55}%"></b></i></div>`).join("");
+  $("matchBtn").disabled = G.key[i] < 0 && !G.bpm[i];
+  nb = neighbors(i);
+  highlight = new Set([i, ...nb]); applyFilter();
+  $("nbrs").innerHTML = ""; for (const j of nb) $("nbrs").appendChild(row(j));
+  ring.position.set(pos[i*3], pos[i*3+1], pos[i*3+2]); ring.visible = true; drawWeb();
+  if (autoplay) play(i);
+}
+$("sameType").onchange = () => sel >= 0 && select(sel, false);
+$("playBtn").onclick = () => sel >= 0 && play(sel);
+$("copyBtn").onclick = () => { if (sel < 0) return; const t = document.createElement("textarea"); t.value = pathOf(sel); document.body.appendChild(t); t.select(); document.execCommand("copy"); t.remove(); $("copyBtn").textContent = "Copied"; setTimeout(() => $("copyBtn").textContent = "Copy path", 1200); };
+$("matchBtn").onclick = () => { matchOn = !matchOn; $("matchBtn").classList.toggle("on", matchOn); applyFilter(); };
+let fly = null;
+function flyTo(i) { fly = { from: controls.target.clone(), to: new THREE.Vector3(pos[i*3], pos[i*3+1], pos[i*3+2]), t: 0 }; }
+
+// ---------- drift: wander from sound to similar sound ----------
+let driftTimer = null; const visited = new Set();
+function stopDrift() { clearInterval(driftTimer); driftTimer = null; $("driftBtn").classList.remove("on"); $("driftBtn").textContent = "Drift"; }
+$("driftBtn").onclick = () => {
+  if (driftTimer) return stopDrift();
+  if (sel < 0) return;
+  visited.clear(); visited.add(sel); $("driftBtn").classList.add("on"); $("driftBtn").textContent = "Stop drift";
+  driftTimer = setInterval(() => {
+    const next = nb.find(j => !visited.has(j)) ?? nb[Math.floor(Math.random() * nb.length)];
+    if (next === undefined) return stopDrift();
+    visited.add(next); const keep = driftTimer; select(next); driftTimer = keep; $("driftBtn").classList.add("on"); $("driftBtn").textContent = "Stop drift"; flyTo(next);
+  }, 1600);
+};
+
+// ---------- build a kit around the selected sound ----------
+const ROLES = ["kick", "snare_clap", "hat", "perc", "bass", "melodic", "loop", "texture"];
+let fillPick = [];
+function autoFill() {
+  if (sel < 0) return;
+  const anchor = sel, chosen = { [typeName(anchor)]: anchor };
+  const lofi = (G.chars[G.ch[anchor]] || "").includes("lofi");
+  let key = G.key[anchor], bpm = G.bpm[anchor] && typeName(anchor) === "loop" ? G.bpm[anchor] : 0;
+  for (const role of ROLES) {
+    if (chosen[role] !== undefined) continue;
+    const ti = tIdx(role); if (ti < 0) continue;
+    const top = [];
+    for (let j = 0; j < N; j++) {
+      if (G.t[j] !== ti) continue;
+      if (G.dup[j] >= 0 && dupFirst.get(G.dup[j]) !== j) continue;
+      let d = vibeDist(anchor, j, ["bright", "noise", "width"]);          // same overall color and grit
+      if (G.p[j] === G.p[anchor]) d *= 0.6;                               // same pack tends to glue together
+      if (lofi !== (G.chars[G.ch[j]] || "").includes("lofi")) d += 2500;
+      if (["bass", "melodic", "loop"].includes(role) && key >= 0) d += keyCompat(key, G.key[j]) ? 0 : 6000;
+      if (role === "loop") { if (!G.bpm[j]) continue; if (bpm) d += tempoCompat(bpm, G.bpm[j]) ? 0 : 6000; }
+      if (role === "bass" && chosen.kick !== undefined && G.midi[j] >= 0 && G.midi[chosen.kick] >= 0) {
+        if (Math.abs(G.midi[j] - G.midi[chosen.kick]) % 12 < 2) d += 3000;  // keep the bass note off the kick's pitch
+      }
+      if (role === "hat") d += (255 - G.feats.bright[j]) * 8;              // hats should stay crisp
+      if (top.length < 6) { top.push([d, j]); top.sort((a, b) => a[0] - b[0]); }
+      else if (d < top[5][0]) { top[5] = [d, j]; top.sort((a, b) => a[0] - b[0]); }
+    }
+    if (!top.length) continue;
+    const pickJ = top[Math.floor(Math.random() * Math.min(top.length, 4))][1];
+    chosen[role] = pickJ;
+    if (key < 0 && G.key[pickJ] >= 0 && ["bass", "melodic", "loop"].includes(role)) key = G.key[pickJ];
+    if (!bpm && role === "loop") bpm = G.bpm[pickJ];
+  }
+  fillPick = ROLES.map(r => [r, chosen[r]]).filter(([, j]) => j !== undefined);
+  $("fill").innerHTML = ""; for (const [r, j] of fillPick) $("fill").appendChild(row(j, TYPE_LABEL[r] || r));
+  $("fillBox").style.display = "block";
+  highlight = new Set([sel, ...fillPick.map(x => x[1])]); applyFilter();
+}
+$("fillBtn").onclick = autoFill; $("fillRoll").onclick = autoFill;
+$("fillAdd").onclick = () => { for (const [, j] of fillPick) if (!kit.includes(j)) kit.push(j); drawKit(); };
+
+// ---------- kit ----------
+const kit = [];
+function drawKit() {
+  $("kitbox").style.display = kit.length ? "block" : "none"; $("kitCount").textContent = `(${kit.length})`;
+  $("kit").innerHTML = "";
+  kit.forEach((j, n) => { const d = document.createElement("div");
+    d.innerHTML = `<span class="sw" style="background:${TYPE_COLOR[typeName(j)]||"#888"}"></span>${G.n[j]}<small>remove</small>`;
+    d.onclick = e => { if (e.target.tagName === "SMALL") { kit.splice(n,1); drawKit(); } else play(j); };
+    $("kit").appendChild(d); });
+}
+$("kitBtn").onclick = () => { if (sel >= 0 && !kit.includes(sel)) { kit.push(sel); drawKit(); } };
+$("clearKit").onclick = () => { kit.length = 0; drawKit(); };
+$("saveKit").onclick = () => {
+  const lines = kit.map(j => [typeName(j), G.bpm[j] || "", KEYN(G.key[j]), pathOf(j)].join("\t"));
+  const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob(["type\tbpm\tkey\tpath\n" + lines.join("\n")], { type:"text/plain" }));
+  a.download = "hardpan_kit.txt"; a.click();
+};
+
+// ---------- mouse ----------
+let down = null, lastHover = -1, hoverT = 0;
+const tipWave = document.createElement("canvas");
+renderer.domElement.addEventListener("pointerdown", e => down = [e.clientX, e.clientY]);
+renderer.domElement.addEventListener("pointerup", e => {
+  if (!down || Math.hypot(e.clientX-down[0], e.clientY-down[1]) > 4) return;
+  const i = pick(e.clientX, e.clientY); stopDrift(); select(i);
+});
+renderer.domElement.addEventListener("pointermove", e => {
+  const now = performance.now(); if (now - hoverT < 70 || e.buttons) return; hoverT = now;
+  const i = pick(e.clientX, e.clientY, 7), tip = $("tip");
+  if (i < 0) { tip.style.display = "none"; lastHover = -1; return; }
+  tip.style.display = "block"; tip.style.left = Math.min(e.clientX + 14, innerWidth - 300) + "px"; tip.style.top = e.clientY + 12 + "px";
+  if (i !== lastHover) {
+    tip.textContent = `${G.n[i]}  ·  ${describe(i)}  ·  ${G.clusters[G.cl[i]].label}`;
+    if (drawWave(tipWave, i, 260, 34)) tip.appendChild(tipWave);
+    if ($("hoverPlay").checked) play(i);
+  }
+  lastHover = i;
+});
+addEventListener("keydown", e => {
+  if (document.activeElement.tagName === "INPUT") return;
+  if (e.key === "Escape") select(-1);
+  if (e.key === " ") {                            // space: stop if something is playing, else replay the selected sound
+    e.preventDefault();
+    if (!audio.paused && !audio.ended) { audio.pause(); audio.currentTime = 0; }
+    else if (sel >= 0) play(sel);
+  }
+});
+
+// ---------- run ----------
+function resize() { renderer.setSize(innerWidth, innerHeight); camera.aspect = innerWidth/innerHeight; camera.updateProjectionMatrix(); mat.uniforms.scale.value = innerHeight/2; }
+addEventListener("resize", resize); resize();
+layout(false); colorize(); applyFilter();
+if (!TH) $("status").textContent += "  ·  waveforms not made yet (run Open-Galaxy.ps1 -Waveforms)";
+(function loop() {
+  requestAnimationFrame(loop);
+  if (tween < 1) {
+    tween = Math.min(1, tween + 0.03); const k = tween < .5 ? 2*tween*tween : 1 - (-2*tween+2)**2/2;
+    for (let i = 0; i < N*3; i++) pos[i] = start[i] + (target[i]-start[i])*k;
+    geo.attributes.position.needsUpdate = true;
+    if (sel >= 0) { ring.position.set(pos[sel*3], pos[sel*3+1], pos[sel*3+2]); drawWeb(); }
+    if (tween >= 1) afterMove();
+  }
+  if (fly) { fly.t = Math.min(1, fly.t + 0.04); controls.target.lerpVectors(fly.from, fly.to, fly.t); if (fly.t >= 1) fly = null; }
+  ring.lookAt(camera.position);
+  controls.update(); renderer.render(scene, camera);
+})();
+</script>
+</body>
+</html>
