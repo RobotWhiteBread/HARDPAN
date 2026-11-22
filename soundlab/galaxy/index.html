@@ -58,6 +58,7 @@
 
   <h2>Map</h2>
   <label class="row">Layout <select id="layoutMode"><option value="sim">Similarity islands</option><option value="types">Sound types (one galaxy each)</option><option value="axes">Choose the axes</option></select></label>
+  <button id="allGalaxies" style="display:none;width:100%;margin:4px 0">Back to all types</button>
   <div id="axesBox" style="display:none">
     <label class="row">Left / right <select id="ax"></select></label>
     <label class="row">Up / down <select id="ay"></select></label>
@@ -87,7 +88,7 @@
   <label class="row">Look at <select id="gapType"><option value="">pick a type</option></select></label>
   <div id="gaps"></div>
 
-  <div class="hint">Drag to orbit, scroll to zoom, right-drag to pan. Hover to hear. Click a dot for its closest matches. Shift+click (or Cart mode) drops it in your cart. Esc clears, Space plays or stops.</div>
+  <div class="hint">Drag to orbit, scroll to zoom, right-drag to pan. Hover to hear. Click a dot for its closest matches. Shift+click (or Cart mode) drops it in your cart. In Sound types, double-click a galaxy to focus it. Esc clears, Space plays or stops.</div>
 </div>
 
 <div id="right" class="panel">
@@ -235,10 +236,17 @@ function setAllTypes(v) { typeOn.fill(v); $("types").querySelectorAll("input").f
 
 // ---------- sound-type galaxies: one mini galaxy per type, in a 3 x 3 wall ----------
 const CELL = 112, MINI = 84, COLS = 3;
-const cellOf = new Map();                                   // type index -> [x, y]
-order.forEach((ti, k) => { const r = Math.floor(k / COLS), c = k % COLS;
-  const rows = Math.ceil(order.length / COLS);
-  cellOf.set(ti, [(c - (COLS - 1) / 2) * CELL, ((rows - 1) / 2 - r) * CELL]); });
+let focusType = -1;                                         // -1: all types side by side; else that type fills the space
+function cellFor(ti) {                                      // -> [x, y, z, size]
+  const k = order.indexOf(ti);
+  if (focusType < 0) {
+    const r = Math.floor(k / COLS), c = k % COLS, rows = Math.ceil(order.length / COLS);
+    return [(c - (COLS - 1) / 2) * CELL, ((rows - 1) / 2 - r) * CELL, 0, MINI];
+  }
+  if (ti === focusType) return [0, 0, 0, 210];
+  const others = order.filter(t => t !== focusType), j = others.indexOf(ti), a = (j / others.length) * Math.PI * 2;
+  return [Math.cos(a) * 190, Math.sin(a) * 135, -90, 30];   // the rest orbit as small thumbnails
+}
 const typeBox = G.types.map(() => null);                     // each type's own spread, so every mini galaxy fills its cell
 {
   const by = G.types.map(() => [[], [], []]);
@@ -251,17 +259,21 @@ function drawTypeFrames(on) {
   typeFrames.clear();
   if (!on) return;
   for (const ti of order) {
-    const [cx, cy] = cellOf.get(ti), col = new THREE.Color(TYPE_COLOR[G.types[ti]] || "#888");
-    const f = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(MINI + 8, MINI + 8, MINI + 8)), new THREE.LineBasicMaterial({ color: col, transparent: true, opacity: .18 }));
-    f.position.set(cx, cy, 0); typeFrames.add(f);
-    const s = makeLabel(`${TYPE_LABEL[G.types[ti]] || G.types[ti]}  ${typeCounts[ti].toLocaleString()}`, "#" + col.getHexString(), 30);
-    s.position.set(cx, cy + MINI / 2 + 12, 0); typeFrames.add(s);
+    const [cx, cy, cz, sz] = cellFor(ti), col = new THREE.Color(TYPE_COLOR[G.types[ti]] || "#888");
+    const f = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(sz + 8, sz + 8, sz + 8)), new THREE.LineBasicMaterial({ color: col, transparent: true, opacity: ti === focusType ? .1 : .18 }));
+    f.position.set(cx, cy, cz); typeFrames.add(f);
+    const s = makeLabel(`${TYPE_LABEL[G.types[ti]] || G.types[ti]}  ${typeCounts[ti].toLocaleString()}`, "#" + col.getHexString(), focusType >= 0 && ti !== focusType ? 22 : 30);
+    s.position.set(cx, cy + sz / 2 + (sz > 100 ? 18 : 10), cz); typeFrames.add(s);
   }
 }
-function flyToType(ti) {
-  const [cx, cy] = cellOf.get(ti);
-  fly = { from: controls.target.clone(), to: new THREE.Vector3(cx, cy, 0), t: 0,
-          camFrom: camera.position.clone(), camTo: new THREE.Vector3(cx + 40, cy + 25, 150) };
+function flyToType(ti) { focusGalaxy(ti); }
+function focusGalaxy(ti) {                                  // expand one type's galaxy to fill the space
+  focusType = ti;
+  $("allGalaxies").style.display = ti >= 0 ? "block" : "none";
+  $("allGalaxies").textContent = ti >= 0 ? `Back to all types (now: ${TYPE_LABEL[G.types[ti]] || G.types[ti]})` : "Back to all types";
+  layout();
+  fly = { from: controls.target.clone(), to: new THREE.Vector3(0, 0, 0), t: 0,
+          camFrom: camera.position.clone(), camTo: ti >= 0 ? new THREE.Vector3(110, 70, 300) : new THREE.Vector3(150, 90, 380) };
   controls.autoRotate = false;
 }
 
@@ -275,9 +287,9 @@ function layout(animate = true) {
     for (let i = 0; i < N; i++) { target[i*3] = G.sx[i]/10; target[i*3+1] = G.sy[i]/10; target[i*3+2] = G.sz[i]/10; }
   } else if (mode === "types") {
     for (let i = 0; i < N; i++) {
-      const ti = G.t[i], b = typeBox[ti], [cx, cy] = cellOf.get(ti);
+      const ti = G.t[i], b = typeBox[ti], [cx, cy, cz, sz] = cellFor(ti);
       const n = (v, k) => Math.max(-.5, Math.min(.5, (v - b[k][0]) / ((b[k][1] - b[k][0]) || 1) - .5));
-      target[i*3] = cx + n(G.sx[i], 0) * MINI; target[i*3+1] = cy + n(G.sy[i], 1) * MINI; target[i*3+2] = n(G.sz[i], 2) * MINI;
+      target[i*3] = cx + n(G.sx[i], 0) * sz; target[i*3+1] = cy + n(G.sy[i], 1) * sz; target[i*3+2] = cz + n(G.sz[i], 2) * sz;
     }
   } else {
     const fx = G.feats[$("ax").value], fy = G.feats[$("ay").value], fz = G.feats[$("az").value];
@@ -287,7 +299,8 @@ function layout(animate = true) {
   }
   if (!animate) { pos.set(target); geo.attributes.position.needsUpdate = true; afterMove(); } else tween = 0;
 }
-$("layoutMode").onchange = () => { $("axesBox").style.display = $("layoutMode").value === "axes" ? "block" : "none"; layout(); };
+$("allGalaxies").onclick = () => focusGalaxy(-1);
+$("layoutMode").onchange = () => { if ($("layoutMode").value !== "types" && focusType >= 0) { focusType = -1; $("allGalaxies").style.display = "none"; } $("axesBox").style.display = $("layoutMode").value === "axes" ? "block" : "none"; layout(); };
 ["ax","ay","az"].forEach(id => $(id).onchange = () => layout());
 
 function afterMove() {
@@ -629,6 +642,11 @@ renderer.domElement.addEventListener("pointerup", e => {
   if ($("cartMode").checked || e.shiftKey) { addToCart(i); return; }
   stopDrift(); select(i);
 });
+renderer.domElement.addEventListener("dblclick", e => {
+  if ($("layoutMode").value !== "types") return;
+  const i = pick(e.clientX, e.clientY, 12);
+  if (i >= 0 && G.t[i] !== focusType) focusGalaxy(G.t[i]);
+});
 renderer.domElement.addEventListener("pointermove", e => {
   const now = performance.now(); if (now - hoverT < 70 || e.buttons) return; hoverT = now;
   const i = pick(e.clientX, e.clientY, 7), tip = $("tip");
@@ -643,7 +661,7 @@ renderer.domElement.addEventListener("pointermove", e => {
 });
 addEventListener("keydown", e => {
   if (document.activeElement.tagName === "INPUT") return;
-  if (e.key === "Escape") select(-1);
+  if (e.key === "Escape") { if (sel < 0 && focusType >= 0) focusGalaxy(-1); else select(-1); }
   if (e.key === "c" || e.key === "C") setCartMode(!$("cartMode").checked);
   if (e.key === " ") {                            // space: stop if something is playing, else replay the selected sound
     e.preventDefault();

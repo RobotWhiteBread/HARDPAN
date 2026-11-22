@@ -1,4 +1,4 @@
-﻿# Python
+# Python
 .venv/
 venv/
 env/
@@ -42,3 +42,24 @@ desktop.ini
 # SILT: outside audio stays out of the repository (see SILT.md)
 library/
 exports/
+
+# Studio setup: downloaded plugin installers and cloned reference code stay out of the repository
+studio_setup/downloads/
+reference/
+studio_setup/samples/
+studio_setup/projects/
+
+# Purchased sample packs (licensed, never commit)
+Drum_Broker/
+*.zip
+*.crdownload
+
+ni_lofi/
+
+sample_zips/
+
+samples_from_mars/
+
+samples_from_mars/
+Loud_Foundry/
+LoudFoundry/
