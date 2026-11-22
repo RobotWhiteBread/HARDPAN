@@ -12,6 +12,18 @@ avoids clicks.
 Named for the compacted soil layer under the topsoil. Hard, flat, and the
 thing everything else sits on.
 
+## soundlab: your sample library on one 3D map
+
+[![The Sound Galaxy](soundlab/demos/post1_galaxy.png)](soundlab/README.md)
+
+[`soundlab/`](soundlab/) measures every sample you own (tempo, key, brightness,
+punch, low end and more), groups similar sounds into named islands, and puts
+them all on a 3D map you can fly through. Hover to hear a sound, click for its
+closest matches, drop favorites in a cart, find duplicate files and gaps in your
+collection, then build kits and songs in REAPER from what you find. It runs on
+your own machine (Windows, Mac or Linux) and never uploads anything. The
+[soundlab README](soundlab/README.md) has a five minute quick start.
+
 ## Sound target
 Dark and hard-driving, with an 80s edge. On one side, the eerie, ominous
 screen scores of Nick Cave and Warren Ellis; on the other, the
