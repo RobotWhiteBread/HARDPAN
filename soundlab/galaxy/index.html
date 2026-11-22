@@ -47,6 +47,15 @@
   .gap { font-size:12px; margin:3px 0; color:var(--text); }
   .gap small { color:var(--dim); }
   #wave { width:100%; height:44px; display:block; margin:6px 0; }
+  #legend { position:fixed; bottom:12px; left:50%; transform:translateX(-50%); max-width:min(760px, calc(100% - 640px)); min-width:320px; font-size:12px; padding:8px 12px; }
+  #legend b { color:var(--accent); font-weight:600; }
+  #legend .lk { color:var(--dim); }
+  #methods { top:50%; left:50%; transform:translate(-50%,-50%); width:min(760px, 92vw); max-height:86vh; overflow:auto; display:none; z-index:20; font-size:13px; }
+  #methods h3 { font-size:13px; margin:14px 0 4px; color:var(--accent); }
+  #methods table { border-collapse:collapse; width:100%; font-size:12px; }
+  #methods td { border-top:1px solid var(--line); padding:4px 6px; vertical-align:top; }
+  #methods td:first-child { white-space:nowrap; color:var(--text); font-weight:600; }
+  #methods p, #methods li { color:#b9c3d1; }
 </style>
 </head>
 <body>
@@ -55,6 +64,7 @@
 <div id="left" class="panel">
   <h1>SOUND GALAXY</h1>
   <div class="hint" id="total" style="margin-top:0"></div>
+  <button id="howBtn" style="width:100%;margin-top:8px">How this works: what every axis measures</button>
 
   <h2>Map</h2>
   <label class="row">Layout <select id="layoutMode"><option value="sim">Similarity islands</option><option value="types">Sound types (one galaxy each)</option><option value="axes">Choose the axes</option></select></label>
@@ -123,6 +133,41 @@
   </div>
   <h2>Sounds like this <label style="text-transform:none;letter-spacing:0;float:right;font-weight:400"><input type="checkbox" id="sameType" checked> same type</label></h2>
   <div class="list" id="nbrs"></div>
+</div>
+
+<div id="legend" class="panel"></div>
+
+<div id="methods" class="panel">
+  <div style="display:flex;justify-content:space-between;align-items:center"><h1>HOW THE SOUND GALAXY WORKS</h1><button id="methodsClose">Close (Esc)</button></div>
+  <p>Every file is opened and measured by soundlab's analyzer: the first 30 seconds, mixed to mono, cut into 2048-sample windows (Hann, hop 512) and turned into a spectrum. Nothing is uploaded and no AI model listens to your files: every number below is plain signal math you can check. Full details are in METHODS.md next to this page.</p>
+  <h3>What each axis measures</h3>
+  <table>
+    <tr><td>Brightness</td><td>Spectral centroid: the balance point of the average spectrum, in Hz, on a log scale. Low = dark, high = bright. Tags: dark under 900 Hz, bright over 3.5 kHz.</td></tr>
+    <tr><td>Punch</td><td>Crest factor: peak level minus average (RMS) level, in dB. High = spiky transients, low = squashed or sustained. Tagged punchy at 18 dB or more with a fast attack, squashed under 9 dB.</td></tr>
+    <tr><td>Low end</td><td>Share of all energy between 20 and 250 Hz (sub 20 to 60 plus low 60 to 250). Tagged subby when over 25% sits under 60 Hz.</td></tr>
+    <tr><td>Length</td><td>Duration in seconds, on a log scale.</td></tr>
+    <tr><td>Noisiness</td><td>Spectral flatness: how even the spectrum is (geometric mean over arithmetic mean). Near 0 = pitched and tonal, near 1 = noise. Tagged noisy over 0.25.</td></tr>
+    <tr><td>Stereo width</td><td>Side level over mid level ((L-R)/2 against (L+R)/2). 0 = mono. Tagged wide over 0.35. Mono files sit at the bottom.</td></tr>
+    <tr><td>Snap</td><td>How fast the sound reaches its loudest moment (attack time, about 12 ms resolution). Higher = snappier.</td></tr>
+    <tr><td>Tempo</td><td>For sounds 1.8 s or longer: autocorrelation of the onset envelope (spectral flux), tested from 60 to 180 BPM, with a bonus when the file is a whole number of bars. The REAPER project tools prefer a tempo written in the file name when there is one.</td></tr>
+  </table>
+  <h3>How positions are scaled</h3>
+  <p>On "Choose the axes", each axis is a rank, not a raw value: the middle of an axis is the median sound in your library, and the ends are your darkest and brightest (or least and most punchy) sounds. Ranking keeps sounds from piling up against an edge. Sounds with identical values share a rank, so a real pile-up still shows. The bars in the side panel use the same ranks, so 80% means "more than 80% of your library".</p>
+  <h3>Similarity islands</h3>
+  <p>Each sound becomes a point in 7 dimensions (the measures above except tempo, scaled 0 to 1 between the 1st and 99th percentile), plus a weight for its sound type so islands stay mostly one kind of sound. K-means groups them into 360 islands. t-SNE then places the 360 island centers in 3D so similar islands sit near each other, and each sound is spread around its island center along the three main ways sounds in that island differ. Distance means difference; the directions themselves have no fixed meaning. Island names are the main sound type plus any tag shared by at least 30% of its members.</p>
+  <h3>Sound types and tags</h3>
+  <p>Types are rule-based guesses from length, where the energy sits, flatness and how many hits a file has. Loops: 1.8 s or longer, with at least 4 hits, more than 1.2 hits a second, and a whole number of bars or more than 4 s. One-shots under 1.2 s: kick if at least half the energy is under 250 Hz and the centroid is under 900 Hz; hat if at least half is over 2.5 kHz and it is noisy; snare or clap if at least 30% sits between 250 Hz and 2.5 kHz; otherwise perc. Longer sounds: bass, melodic, texture or FX and noise by low-end share and flatness. Lofi means 85% of the energy sits below 4.5 kHz.</p>
+  <h3>Key, note and matching</h3>
+  <p>Key: a 12-note chroma profile (55 Hz to 5 kHz) correlated with the Krumhansl-Kessler major and minor profiles, only for tonal sounds and only when one key clearly wins. Note: harmonic product spectrum on the first 1.5 s of sounds up to 6 s long. Match key and tempo keeps keys that are the same, a fifth apart, or relative major and minor, and tempos within 6% (or at double or half time).</p>
+  <h3>Neighbors, copies, gaps, use</h3>
+  <ul>
+    <li><b>Sounds like this</b>: the 14 nearest sounds by distance across the 7 ranked measures, plus tempo difference when both have a tempo. Exact copies are skipped.</li>
+    <li><b>Extra copies</b>: files with identical length, level, peak, brightness and sample rate, usually the same sample shipped in more than one pack.</li>
+    <li><b>Gaps</b>: the chosen axes are cut into a 6 x 6 x 6 grid. A gap is a cell where your library has at least 25 sounds but 2 or fewer of the chosen type, next to cells that do have that type.</li>
+    <li><b>Used vs owned</b>: every REAPER project (.rpp) in your project folders is read, and each sample it references is matched by exact file path.</li>
+  </ul>
+  <h3>Limits</h3>
+  <p>Types, keys and tempos are educated guesses, not ground truth: key detection on drums is unreliable, a long one-shot can read as a loop, and only the first 30 s of a long file is measured. The measures describe the sound, not whether it is good. Use the map to find candidates, then trust your ears.</p>
 </div>
 
 <div id="kitbox" class="panel">
@@ -211,7 +256,39 @@ function makeLabel(text, color = "#c9d3e0", px = 26) {
   const s = new THREE.Sprite(new THREE.SpriteMaterial({ map:new THREE.CanvasTexture(cv), transparent:true, depthTest:false }));
   s.scale.set(w / 9, cv.height / 9, 1); s.renderOrder = 5; return s;
 }
-const islandLabels = new THREE.Group(), packLabels = new THREE.Group(); scene.add(islandLabels, packLabels);
+const islandLabels = new THREE.Group(), packLabels = new THREE.Group(), axisLabels = new THREE.Group(); scene.add(islandLabels, packLabels, axisLabels);
+const ENDS = { bright:["dark","bright"], punch:["squashed","punchy"], body:["thin","heavy low end"], length:["short","long"],
+  noise:["tonal","noisy"], width:["mono","wide"], snap:["slow attack","fast attack"], tempo:["slow","fast"] };
+const AXIS_COLOR = ["#ff8a7a", "#8affb0", "#8ac4ff"];
+function drawAxisLabels() {
+  axisLabels.clear();
+  if ($("layoutMode").value !== "axes") return;
+  const H = 110, o = 10, ks = [$("ax").value, $("ay").value, $("az").value];
+  const put = (txt, color, px, x, y, z) => { const s = makeLabel(txt, color, px); s.position.set(x, y, z); axisLabels.add(s); };
+  // left to right, along the bottom front edge
+  put(`${G.featLabels[ks[0]]}  (left to right)`, AXIS_COLOR[0], 30, 0, -H - 2*o, H);
+  put(ENDS[ks[0]][0], AXIS_COLOR[0], 22, -H + 12, -H - o, H); put(ENDS[ks[0]][1], AXIS_COLOR[0], 22, H - 12, -H - o, H);
+  // bottom to top, along the front left edge
+  put(`${G.featLabels[ks[1]]}  (bottom to top)`, AXIS_COLOR[1], 30, -H - 4*o, 0, H);
+  put(ENDS[ks[1]][0], AXIS_COLOR[1], 22, -H - 3*o, -H + 8, H); put(ENDS[ks[1]][1], AXIS_COLOR[1], 22, -H - 3*o, H - 8, H);
+  // far to near, along the bottom left edge
+  put(`${G.featLabels[ks[2]]}  (far to near)`, AXIS_COLOR[2], 30, -H - 2*o, -H - 2*o, 0);
+  put(ENDS[ks[2]][0], AXIS_COLOR[2], 22, -H - o, -H - o, -H + 12); put(ENDS[ks[2]][1], AXIS_COLOR[2], 22, -H - o, -H - o, H - 12);
+}
+const COLOR_TEXT = { type:"Color: sound type (see the list on the left).", key:"Color: key, around the circle of fifths. Minor keys are darker; grey has no clear key.",
+  pack:"Color: pack. Each pack gets its own hue.", tempo:"Color: tempo, blue at 60 BPM through to red at 180 BPM; grey has no tempo.",
+  island:"Color: similarity island.", used:"Color: gold = used in your REAPER projects (brighter = more projects), dim = never used." };
+function drawLegend() {
+  const mode = $("layoutMode").value, ks = [$("ax").value, $("ay").value, $("az").value];
+  let t;
+  if (mode === "axes") t = `<span class="lk">Left to right</span> <b>${G.featLabels[ks[0]]}</b> (${ENDS[ks[0]].join(" to ")}) &nbsp; <span class="lk">Bottom to top</span> <b>${G.featLabels[ks[1]]}</b> (${ENDS[ks[1]].join(" to ")}) &nbsp; <span class="lk">Far to near</span> <b>${G.featLabels[ks[2]]}</b> (${ENDS[ks[2]].join(" to ")}). Positions are ranks: the middle of each axis is your median sound.`;
+  else if (mode === "types") t = `<b>One galaxy per sound type.</b> Inside each box, sounds that measure alike sit together; the directions have no fixed meaning.`;
+  else t = `<b>Similarity islands.</b> Sounds that measure alike across brightness, punch, low end, length, noisiness, width and snap sit together. Distance means difference; the directions have no fixed meaning.`;
+  $("legend").innerHTML = `${t} ${COLOR_TEXT[$("colorBy").value] || ""} <a href="#" id="legendHow" style="color:var(--accent)">How this works</a>`;
+  $("legendHow").onclick = e => { e.preventDefault(); openMethods(true); };
+}
+function openMethods(v) { $("methods").style.display = v ? "block" : "none"; }
+$("howBtn").onclick = () => openMethods(true); $("methodsClose").onclick = () => openMethods(false);
 
 // ---------- left panel ----------
 for (const id of ["ax","ay","az"]) for (const k of featKeys) $(id).add(new Option(G.featLabels[k], k));
@@ -293,7 +370,7 @@ let tween = 1;
 function layout(animate = true) {
   start.set(pos);
   const mode = $("layoutMode").value;
-  box.visible = mode !== "types"; drawTypeFrames(mode === "types");
+  box.visible = mode !== "types"; drawTypeFrames(mode === "types"); drawAxisLabels(); drawLegend();
   if (mode === "sim") {
     for (let i = 0; i < N; i++) { target[i*3] = G.sx[i]/10; target[i*3+1] = G.sy[i]/10; target[i*3+2] = G.sz[i]/10; }
   } else if (mode === "types") {
@@ -349,7 +426,7 @@ function colorize() {
   }
   geo.attributes.color.needsUpdate = true;
 }
-$("colorBy").onchange = colorize;
+$("colorBy").onchange = () => { colorize(); drawLegend(); };
 $("size").oninput = e => mat.uniforms.size.value = +e.target.value;
 
 // ---------- key and tempo rules ----------
@@ -410,7 +487,7 @@ function drawUse() {
   $("useTypes").innerHTML = `<div class="bars">` + order.map(ti => { const t = G.types[ti], w = ut[ti] ? Math.max(2, 100 * ut[ti] / typeCounts[ti]) : 0;
     return `<div><span style="width:96px">${TYPE_LABEL[t] || t}</span><i><b style="width:${w}%;background:${TYPE_COLOR[t] || "#888"}"></b></i><span style="width:78px;text-align:right">${ut[ti]} of ${typeCounts[ti].toLocaleString()}</span></div>`; }).join("") + `</div>`;
 }
-$("useColor").onclick = () => { $("colorBy").value = "used"; colorize(); };
+$("useColor").onclick = () => { $("colorBy").value = "used"; colorize(); drawLegend(); };
 $("roulette").onclick = () => {
   const touched = new Uint8Array(G.clusters.length);
   for (let i = 0; i < N; i++) if (useCount[i]) touched[G.cl[i]] = 1;
@@ -700,6 +777,7 @@ renderer.domElement.addEventListener("pointermove", e => {
 });
 addEventListener("keydown", e => {
   if (document.activeElement.tagName === "INPUT") return;
+  if (e.key === "Escape" && $("methods").style.display === "block") { openMethods(false); return; }
   if (e.key === "Escape") { if (sel < 0 && focusType >= 0) focusGalaxy(-1); else select(-1); }
   if (e.key === "c" || e.key === "C") setCartMode(!$("cartMode").checked);
   if (e.key === " ") {                            // space: stop if something is playing, else replay the selected sound

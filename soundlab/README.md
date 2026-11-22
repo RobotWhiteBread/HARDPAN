@@ -96,6 +96,10 @@ you can do with the pieces above; they need those packs to run.
 | `stoner_doom/Soundlab_Doom.lua`: six varispeed doom songs | LoudFoundry Stoner Doom Rock pack |
 | `galaxy_demo/make_demo.py`: the vertical video and photos below | ffmpeg, Pillow, sounds of your choice |
 
+## Methods
+
+Every measure, threshold and map step is written out in [METHODS.md](METHODS.md). In the Galaxy, the "How this works" button shows the short version.
+
 ## Privacy and licenses
 
 Your settings, catalog, measurements, Galaxy data, reference tracks and reports
