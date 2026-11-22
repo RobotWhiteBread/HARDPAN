@@ -57,7 +57,9 @@ Rule-based, checked in this order:
 Seven measures make up a sound's profile: brightness, punch, low end, length, noisiness, stereo width and snap. Tempo is kept separately.
 
 - **For the islands**, each measure is scaled from 0 to 1 between its 1st and 99th percentile, with values outside clipped.
-- **For what the page shows** (the "Choose the axes" layout, the side-panel bars, neighbor search and gaps), each measure is turned into a rank from 1 to 255. The middle of an axis is the median sound in your library. Identical values share the average rank, so a true pile-up still shows.
+- **For what the page shows** (the "Choose the axes" layout, the side-panel bars, neighbor search and gaps), each measure is turned into a rank from 1 to 255. The middle of an axis is the median sound in your library.
+- **Ties.** Some measures stop at a resolution limit, so many sounds read exactly the same: about 19% of sounds have a low-end share of 0.000 (mostly hats), about half reach their peak in the first analysis window, and most files are mono. Inside a tie, sounds are ordered by a related measure before ranking: low end ties by brightness (brightest at the low edge) and snap ties by punch (punchiest at the high edge). Sounds equal on both share the average rank. Stereo width is not tie-broken, because mono is a real, exact value. The page reports any value shared by 5% or more of sounds in its caption.
+- **Shadows.** On "Choose the axes", the visible sounds are binned into a 96 x 96 grid on the back wall, floor and left wall (each wall drops one axis). Brightness follows the log of the count and color is the average color of the sounds in that cell.
 
 ### Similarity islands
 

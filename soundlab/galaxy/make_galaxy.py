@@ -44,23 +44,44 @@ def quantize(vals):
     return [0 if v is None else max(1, min(255, int(1 + 254 * (v - lo) / span))) for v in vals]
 
 
-def rank_quantize(vals):
-    """1..255 by rank, so sounds bunched at one end of a scale still spread out; ties stay together."""
-    present = np.array([v for v in vals if v is not None], dtype=float)
-    if not len(present):
-        return [0] * len(vals)
-    srt = np.sort(present)
-    lo = np.searchsorted(srt, present, "left")
-    hi = np.searchsorted(srt, present, "right")
-    q = 1 + np.round(254 * ((lo + hi - 1) / 2) / max(len(srt) - 1, 1)).astype(int)
-    out, k = [], 0
-    for v in vals:
-        if v is None:
-            out.append(0)
-        else:
-            out.append(int(q[k]))
-            k += 1
+# Inside a big tie (many sounds measured exactly the same), order sounds by a related measure
+# so the tie becomes a band instead of a flat wall: (other measure, direction, wording for the page)
+TIEBREAK = {"body": ("bright", -1, "brightest at the edge"), "snap": ("punch", 1, "punchiest at the edge")}
+
+
+def rank_quantize(vals, second=None):
+    """1..255 by rank, so sounds bunched at one end of a scale still spread out.
+    Sounds equal on both the measure and the tie-break measure share a rank."""
+    keep = [i for i, v in enumerate(vals) if v is not None]
+    out = [0] * len(vals)
+    if not keep:
+        return out
+    prim = np.array([vals[i] for i in keep], dtype=float)
+    sec = np.array([second[i] if second and second[i] is not None else 0.0 for i in keep], dtype=float)
+    order = np.lexsort((sec, prim))
+    sp, ss = prim[order], sec[order]
+    new = np.r_[True, (sp[1:] != sp[:-1]) | (ss[1:] != ss[:-1])]
+    gid = np.cumsum(new) - 1
+    starts = np.flatnonzero(new)
+    ends = np.r_[starts[1:], len(sp)] - 1
+    avg = (starts + ends) / 2.0
+    q = np.empty(len(sp), dtype=int)
+    q[order] = 1 + np.round(254 * avg[gid] / max(len(sp) - 1, 1)).astype(int)
+    for k, i in enumerate(keep):
+        out[i] = int(q[k])
     return out
+
+
+def tie_bands(vals, shown, n):
+    """Values shared by more than 1% of sounds: where they sit on the page's 1..255 scale."""
+    cnt = Counter(v for v in vals if v is not None)
+    bands = []
+    for v, c in cnt.most_common(4):
+        if c < 0.01 * n:
+            break
+        qs = [shown[i] for i, x in enumerate(vals) if x == v]
+        bands.append([min(qs), max(qs), c])
+    return bands
 
 
 def project_use(cfg, rows):
@@ -240,7 +261,7 @@ def main():
         out["bars"].append(int(f(r["bars"])))
         out["midi"].append(note_midi(r["note"]))
 
-    feats, shown = {}, {}
+    raw = {}
     for key, label, fn in FEATS:
         vals = []
         for r in rows:
@@ -248,8 +269,14 @@ def main():
                 vals.append(fn(r))
             except Exception:
                 vals.append(None)
-        feats[key] = quantize(vals)          # islands
-        shown[key] = rank_quantize(vals)     # what the page shows: rank, so nothing piles up at an edge
+        raw[key] = vals
+    feats, shown, bands = {}, {}, {}
+    for key in raw:
+        feats[key] = quantize(raw[key])      # islands
+        tb = TIEBREAK.get(key)               # what the page shows: rank, ties ordered by a related measure
+        second = [None if v is None else tb[1] * v for v in raw[tb[0]]] if tb else None
+        shown[key] = rank_quantize(raw[key], second)
+        bands[key] = tie_bands(raw[key], shown[key], len(rows))
 
     inv = lambda d: [k for k, _ in sorted(d.items(), key=lambda kv: kv[1])]
     type_names, pack_names, char_names = inv(types), inv(packs), inv(chars)
@@ -277,7 +304,8 @@ def main():
     data = {
         "count": len(rows), "types": type_names, "packs": pack_names, "dirs": inv(dirs),
         "notes": inv(notes), "chars": char_names, "keys": KEYS,
-        "featLabels": {k: l for k, l, _ in FEATS}, "feats": shown, **out,
+        "featLabels": {k: l for k, l, _ in FEATS}, "feats": shown, "tieBands": bands,
+        "tieBreak": {k: [G_, w] for k, (G_, _, w) in TIEBREAK.items()}, **out,
         "projects": proj_names, "projectsScanned": n_proj, "use": use,
         "cl": lab.tolist(), "clusters": clusters, "dup": dup,
         "sx": np.round(pos[:, 0] * 10).astype(int).tolist(),

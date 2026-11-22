@@ -73,6 +73,7 @@
     <label class="row">Left / right <select id="ax"></select></label>
     <label class="row">Up / down <select id="ay"></select></label>
     <label class="row">Near / far <select id="az"></select></label>
+    <label class="row">Shadows on the walls <input type="checkbox" id="shadows" checked></label>
   </div>
   <label class="row">Color by
     <select id="colorBy"><option value="type">Sound type</option><option value="key">Key</option><option value="pack">Pack</option><option value="tempo">Tempo</option><option value="island">Island</option><option value="used">Used in your projects</option></select>
@@ -152,7 +153,7 @@
     <tr><td>Tempo</td><td>For sounds 1.8 s or longer: autocorrelation of the onset envelope (spectral flux), tested from 60 to 180 BPM, with a bonus when the file is a whole number of bars. The REAPER project tools prefer a tempo written in the file name when there is one.</td></tr>
   </table>
   <h3>How positions are scaled</h3>
-  <p>On "Choose the axes", each axis is a rank, not a raw value: the middle of an axis is the median sound in your library, and the ends are your darkest and brightest (or least and most punchy) sounds. Ranking keeps sounds from piling up against an edge. Sounds with identical values share a rank, so a real pile-up still shows. The bars in the side panel use the same ranks, so 80% means "more than 80% of your library".</p>
+  <p>On "Choose the axes", each axis is a rank, not a raw value: the middle of an axis is the median sound in your library, and the ends are your darkest and brightest (or least and most punchy) sounds. Ranking keeps sounds from piling up against an edge. Some measures produce big ties: about 1 in 5 sounds (mostly hats) has no measurable energy under 250 Hz, and half of all sounds reach their peak in the first window. Inside a tie, sounds are ordered by a related measure (low end ties by brightness, brightest at the edge; snap ties by punch, punchiest at the edge), so the tie shows as a band whose thickness is its size. Mono files all share one stereo width and still sit on one plane. The shadows on the walls are the cloud seen straight on from each side: brighter means more sounds stacked behind that spot. The bars in the side panel use the same ranks, so 80% means "more than 80% of your library".</p>
   <h3>Similarity islands</h3>
   <p>Each sound becomes a point in 7 dimensions (the measures above except tempo, scaled 0 to 1 between the 1st and 99th percentile), plus a weight for its sound type so islands stay mostly one kind of sound. K-means groups them into 360 islands. t-SNE then places the 360 island centers in 3D so similar islands sit near each other, and each sound is spread around its island center along the three main ways sounds in that island differ. Distance means difference; the directions themselves have no fixed meaning. Island names are the main sound type plus any tag shared by at least 30% of its members.</p>
   <h3>Sound types and tags</h3>
@@ -275,13 +276,58 @@ function drawAxisLabels() {
   put(`${G.featLabels[ks[2]]}  (far to near)`, AXIS_COLOR[2], 30, -H - 2*o, -H - 2*o, 0);
   put(ENDS[ks[2]][0], AXIS_COLOR[2], 22, -H - o, -H - o, -H + 12); put(ENDS[ks[2]][1], AXIS_COLOR[2], 22, -H - o, -H - o, H - 12);
 }
+// ---------- shadows: the cloud's density projected onto the back wall, floor and left wall ----------
+const SB = 96, shadowGroup = new THREE.Group(); scene.add(shadowGroup);
+const walls = [                                     // [plane setup, (x,y,z) -> [u, v] in 0..1]
+  { set: m => { m.position.set(0, 0, -111); },                       uv: (x, y, z) => [(x + 110) / 220, (y + 110) / 220] },
+  { set: m => { m.rotation.x = -Math.PI / 2; m.position.set(0, -111, 0); }, uv: (x, y, z) => [(x + 110) / 220, (110 - z) / 220] },
+  { set: m => { m.rotation.y = Math.PI / 2; m.position.set(-111, 0, 0); },  uv: (x, y, z) => [(110 - z) / 220, (y + 110) / 220] },
+].map(w => {
+  const cv = document.createElement("canvas"); cv.width = cv.height = SB;
+  const tex = new THREE.CanvasTexture(cv); tex.magFilter = THREE.LinearFilter; tex.minFilter = THREE.LinearFilter;
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(220, 220), new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false, side: THREE.DoubleSide, opacity: .85 }));
+  w.set(m); m.renderOrder = -1; shadowGroup.add(m);
+  return { ...w, cv, tex, cnt: new Float32Array(SB * SB), rgb: new Float32Array(SB * SB * 3) };
+});
+function drawShadows() {
+  shadowGroup.visible = $("layoutMode").value === "axes" && $("shadows").checked;
+  if (!shadowGroup.visible) return;
+  for (const w of walls) { w.cnt.fill(0); w.rgb.fill(0); }
+  for (let i = 0; i < N; i++) {
+    if (vis[i] < 0.9) continue;
+    const x = target[i*3], y = target[i*3+1], z = target[i*3+2];
+    for (const w of walls) {
+      const [u, v] = w.uv(x, y, z), cx = Math.min(SB - 1, Math.max(0, Math.floor(u * SB))), cy = Math.min(SB - 1, Math.max(0, Math.floor((1 - v) * SB))), c = cy * SB + cx;
+      w.cnt[c]++; w.rgb[c*3] += col[i*3]; w.rgb[c*3+1] += col[i*3+1]; w.rgb[c*3+2] += col[i*3+2];
+    }
+  }
+  for (const w of walls) {
+    let mx = 0; for (let c = 0; c < SB * SB; c++) mx = Math.max(mx, w.cnt[c]);
+    const g = w.cv.getContext("2d"), img = g.createImageData(SB, SB), L = Math.log(1 + mx) || 1;
+    for (let c = 0; c < SB * SB; c++) {
+      const n = w.cnt[c]; if (!n) continue;
+      const a = Math.log(1 + n) / L, k = 255 * Math.min(1.4, .55 + a);
+      img.data[c*4] = Math.min(255, w.rgb[c*3] / n * k); img.data[c*4+1] = Math.min(255, w.rgb[c*3+1] / n * k); img.data[c*4+2] = Math.min(255, w.rgb[c*3+2] / n * k);
+      img.data[c*4+3] = Math.round(255 * Math.pow(a, 1.3) * .8);
+    }
+    g.putImageData(img, 0, 0); w.tex.needsUpdate = true;
+  }
+}
+$("shadows").onchange = () => { drawShadows(); drawLegend(); };
+function tieNote(k) {
+  const bands = (G.tieBands || {})[k] || [], tb = (G.tieBreak || {})[k];
+  const big = bands.filter(b => b[2] >= 0.05 * N); if (!big.length) return "";
+  const pct = b => Math.round(100 * b[2] / N) + "%";
+  if (tb) return ` <span class="lk">${G.featLabels[k]}:</span> ${big.map(pct).join(" and ")} of sounds read exactly the same; inside each band they are ordered by ${G.featLabels[tb[0]].toLowerCase()}, ${tb[1]}.`;
+  return ` <span class="lk">${G.featLabels[k]}:</span> ${pct(big[0])} of sounds share one reading${k === "width" ? " (mono)" : k === "tempo" ? " (no tempo)" : ""} and sit on one plane.`;
+}
 const COLOR_TEXT = { type:"Color: sound type (see the list on the left).", key:"Color: key, around the circle of fifths. Minor keys are darker; grey has no clear key.",
   pack:"Color: pack. Each pack gets its own hue.", tempo:"Color: tempo, blue at 60 BPM through to red at 180 BPM; grey has no tempo.",
   island:"Color: similarity island.", used:"Color: gold = used in your REAPER projects (brighter = more projects), dim = never used." };
 function drawLegend() {
   const mode = $("layoutMode").value, ks = [$("ax").value, $("ay").value, $("az").value];
   let t;
-  if (mode === "axes") t = `<span class="lk">Left to right</span> <b>${G.featLabels[ks[0]]}</b> (${ENDS[ks[0]].join(" to ")}) &nbsp; <span class="lk">Bottom to top</span> <b>${G.featLabels[ks[1]]}</b> (${ENDS[ks[1]].join(" to ")}) &nbsp; <span class="lk">Far to near</span> <b>${G.featLabels[ks[2]]}</b> (${ENDS[ks[2]].join(" to ")}). Positions are ranks: the middle of each axis is your median sound.`;
+  if (mode === "axes") t = `<span class="lk">Left to right</span> <b>${G.featLabels[ks[0]]}</b> (${ENDS[ks[0]].join(" to ")}) &nbsp; <span class="lk">Bottom to top</span> <b>${G.featLabels[ks[1]]}</b> (${ENDS[ks[1]].join(" to ")}) &nbsp; <span class="lk">Far to near</span> <b>${G.featLabels[ks[2]]}</b> (${ENDS[ks[2]].join(" to ")}). Positions are ranks: the middle of each axis is your median sound.` + [...new Set(ks)].map(tieNote).join("") + ($("shadows").checked ? ` Shadows on the walls show where sounds pile up, seen straight on.` : "");
   else if (mode === "types") t = `<b>One galaxy per sound type.</b> Inside each box, sounds that measure alike sit together; the directions have no fixed meaning.`;
   else t = `<b>Similarity islands.</b> Sounds that measure alike across brightness, punch, low end, length, noisiness, width and snap sit together. Distance means difference; the directions have no fixed meaning.`;
   $("legend").innerHTML = `${t} ${COLOR_TEXT[$("colorBy").value] || ""} <a href="#" id="legendHow" style="color:var(--accent)">How this works</a>`;
@@ -406,7 +452,7 @@ function afterMove() {
       const s = makeLabel(short(G.packs[p]), "#" + c.getHexString(), 20); s.position.set(a[0]/a[3], a[1]/a[3], a[2]/a[3]); packLabels.add(s); });
   }
   if (sel >= 0) { ring.position.set(pos[sel*3], pos[sel*3+1], pos[sel*3+2]); drawWeb(); }
-  drawGaps();
+  drawGaps(); drawShadows();
 }
 $("islandNames").onchange = afterMove; $("packNames").onchange = afterMove;
 
@@ -425,6 +471,7 @@ function colorize() {
     col[i*3] = c.r; col[i*3+1] = c.g; col[i*3+2] = c.b;
   }
   geo.attributes.color.needsUpdate = true;
+  if (typeof drawShadows === "function" && tween >= 1) drawShadows();
 }
 $("colorBy").onchange = () => { colorize(); drawLegend(); };
 $("size").oninput = e => mat.uniforms.size.value = +e.target.value;
@@ -444,7 +491,7 @@ function tempoCompat(a, b) {
 }
 
 // ---------- filter ----------
-let highlight = new Set(), matchOn = false;
+let highlight = new Set(), matchOn = false, shadowT;
 function applyFilter() {
   const q = $("search").value.trim().toLowerCase().split(/\s+/).filter(Boolean);
   const kf = $("keyFilter").value === "" ? -1 : +$("keyFilter").value;
@@ -472,6 +519,7 @@ function applyFilter() {
     vis[i] = v; if (v >= 1) shown++;
   }
   geo.attributes.vis.needsUpdate = true;
+  clearTimeout(shadowT); shadowT = setTimeout(() => tween >= 1 && drawShadows(), 120);
   $("status").textContent = `${shown.toLocaleString()} sounds showing` + (matchOn && sel >= 0 ? " that match the key and tempo" : "");
 }
 let ft; for (const id of ["search","bpmLo","bpmHi"]) $(id).oninput = () => { clearTimeout(ft); ft = setTimeout(applyFilter, 250); };
