@@ -5,10 +5,12 @@ Writes galaxy/data/thumbs_cache.tsv; make_galaxy.py turns it into galaxy_thumbs.
 
   python make_thumbs.py
 """
-import argparse, csv, os, time
+import argparse, csv, os, sys, time
 from concurrent.futures import ProcessPoolExecutor
 import numpy as np
 import soundfile as sf
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import soundlab_config as SC
 
 POINTS = 32
 MAX_SECONDS = 12.0
@@ -34,9 +36,10 @@ def thumb(path):
 def main():
     here = os.path.dirname(os.path.abspath(__file__))
     ap = argparse.ArgumentParser()
-    ap.add_argument("--features", default=r"C:\HARDPAN\studio_setup\samples\_library\features.csv")
+    ap.add_argument("--features", default=None)
     ap.add_argument("--workers", type=int, default=max(1, (os.cpu_count() or 2) - 1))
     a = ap.parse_args()
+    a.features = a.features or SC.lib_file("features.csv")
     cache = os.path.join(here, "data", "thumbs_cache.tsv")
     os.makedirs(os.path.dirname(cache), exist_ok=True)
     done = set()
@@ -45,7 +48,7 @@ def main():
             done = {line.split("\t", 1)[0] for line in fh}
     with open(a.features, newline="", encoding="utf-8") as fh:
         todo = [r["Path"] for r in csv.DictReader(fh)
-                if not r["error"] and r["Path"] not in done and not r["Path"].rsplit("\\", 1)[-1].startswith("._")]
+                if not r["error"] and r["Path"] not in done and not SC.basename(r["Path"]).startswith("._")]
     print(f"{len(done)} waveforms already made, {len(todo)} to go")
     if not todo:
         return

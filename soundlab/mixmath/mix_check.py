@@ -1,11 +1,11 @@
 """
-HARDPAN mix check
+soundlab mix check
 Measures a song or bounce and writes an HTML report with a spinnable 3D
 spectrogram, loudness, tonal balance, low end, clipping and (with stems)
 kick and bass clash.
 
   python mix_check.py song.wav
-  python mix_check.py song.wav --refs K:\\HARDPAN\\soundlab\\refs     (compare to reference tracks)
+  python mix_check.py song.wav --refs refs     (compare to reference tracks)
   python mix_check.py song.wav --kick kick.wav --bass bass.wav          (clash check)
 
 The report opens in your browser. Reference tracks are for comparison only and
@@ -227,7 +227,15 @@ def main():
     here = os.path.dirname(os.path.abspath(__file__))
     tpl = open(os.path.join(here, "report_template.html"), encoding="utf-8").read()
     html = tpl.replace("/*DATA*/null", json.dumps(data, separators=(",", ":")))
-    out = a.out or os.path.splitext(a.file)[0] + "_mixcheck.html"
+    if not a.out:                               # reports go to <projects>/mix_checks, never into sample folders
+        try:
+            sys.path.insert(0, os.path.dirname(here))
+            import soundlab_config as SC
+            base = os.path.join(SC.load(required=False)["projects"], "mix_checks")
+        except Exception:
+            base = os.getcwd()
+        os.makedirs(base, exist_ok=True)
+    out = a.out or os.path.join(base, os.path.splitext(os.path.basename(a.file))[0] + "_mixcheck.html")
     with open(out, "w", encoding="utf-8") as fh:
         fh.write(html)
     for name, val, state, _ in data["checks"]:

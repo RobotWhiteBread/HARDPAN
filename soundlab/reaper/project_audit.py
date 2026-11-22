@@ -1,10 +1,10 @@
 """
-HARDPAN project audit
+soundlab project audit
 Reads every REAPER project, finds the samples each one uses, checks key and
 tempo fit, and picks two alternatives from the library for every sample.
 
 Writes, next to the projects:
-  _upgrades\\<project>.tsv     alternatives for HARDPAN_Upgrade_Project.lua
+  _upgrades\\<project>.tsv     alternatives for Soundlab_Upgrade_Project.lua
   _upgrades\\audit.csv         one row per project (open in Excel)
   _upgrades\\projects.js       which sounds each project uses (for the Sound Galaxy)
 
@@ -13,11 +13,13 @@ Writes, next to the projects:
 import argparse, csv, json, math, os, re
 from collections import Counter, defaultdict
 import numpy as np
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import soundlab_config as SC
 
 KEYS = ["C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"]
 KEYS = KEYS + [k + "m" for k in KEYS]
 TONAL = {"bass", "melodic", "loop"}
-FRESH = ("\\mars\\", "Samples Library")      # Samples From Mars and NI Lo-fi, barely used so far
 VIBE = ["centroid_hz", "crest_db", "low", "dur_s", "flatness", "stereo_width", "attack_ms"]
 
 
@@ -61,9 +63,10 @@ def parse_rpp(path):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--projects", default=r"C:\HARDPAN\studio_setup\projects")
-    ap.add_argument("--features", default=r"C:\HARDPAN\studio_setup\samples\_library\features.csv")
-    ap.add_argument("--catalog", default=r"C:\HARDPAN\studio_setup\samples\_library\catalog.csv")
+    cfg = SC.load()
+    ap.add_argument("--projects", default=cfg["projects"])
+    ap.add_argument("--features", default=SC.lib_file("features.csv", cfg))
+    ap.add_argument("--catalog", default=SC.lib_file("catalog.csv", cfg))
     ap.add_argument("--map-from", default="")   # testing on another machine
     ap.add_argument("--map-to", default="")
     a = ap.parse_args()
@@ -74,7 +77,7 @@ def main():
     rows = []
     with open(local(a.features), newline="", encoding="utf-8") as fh:
         for r in csv.DictReader(fh):
-            if r["error"] or r["Path"].rsplit("\\", 1)[-1].startswith("._") or "powwow" in r["Path"].lower():
+            if r["error"] or SC.basename(r["Path"]).startswith("._") or SC.excluded(r["Path"], cfg):
                 continue
             rows.append(r)
     idx = {r["Path"].lower(): i for i, r in enumerate(rows)}
@@ -85,11 +88,12 @@ def main():
     X = np.clip((raw - lo) / (hi - lo + 1e-9), 0, 1)
     typ = np.array([r["sound_guess"] for r in rows])
     # the pack makers' labels (in file and folder names) beat the audio guesses
-    named = {}
+    named, src_of = {}, {}
     with open(local(a.catalog), newline="", encoding="utf-8-sig") as fh:
         for c in csv.DictReader(fh):
             if c["BPM"] or c["Key"]:
                 named[c["Path"]] = (c["BPM"], c["Key"])
+            src_of[c["Path"]] = (c["Source"], c["Pack"])
     def nkey(r):
         k = named.get(r["Path"], ("", ""))[1].strip()
         k = {"Db": "C#", "D#": "Eb", "Gb": "F#", "G#": "Ab", "A#": "Bb"}.get(k[:2], k[:2] if len(k) > 1 and k[1] in "#b" else k[:1]) + ("m" if k.endswith("m") or "min" in k.lower() else "") if k else ""
@@ -98,13 +102,13 @@ def main():
     bpm = np.array([fl(named.get(r["Path"], ("", ""))[0]) or fl(r["tempo_bpm"]) for r in rows])
     print(f"{sum(1 for r in rows if r['Path'] in named)} sounds carry a tempo or key in their name")
     lofi = np.array(["lofi" in r["character"] for r in rows])
-    fresh = np.array([any(t in r["Path"] for t in FRESH) for r in rows])
     sig = [(r["dur_s"], r["rms_db"], r["peak_db"], r["centroid_hz"]) for r in rows]
     by_type = defaultdict(list)
     for i, t in enumerate(typ):
         by_type[t].append(i)
     by_type = {t: np.array(v) for t, v in by_type.items()}
-    pack_of = lambda p: p.split("\\samples\\", 1)[-1].split("\\")[:2]
+    pack_of = lambda p: src_of.get(p, ("", SC.dirname(p)))
+    source_of = lambda p: src_of.get(p, ("", ""))[0]
 
     def alternatives(i, pkey, ptempo, used):
         cand = by_type[typ[i]]
@@ -120,15 +124,20 @@ def main():
             for j in order[:4000]:
                 if j == i or j in used or sig[j] == sig[i] or j in picks:
                     continue
-                if want_fresh and not fresh[j]:
-                    continue
+                if want_fresh and source_of(rows[j]["Path"]) == source_of(rows[i]["Path"]):
+                    continue                    # second pick: from a different sample source altogether
                 if not want_fresh and pack_of(rows[j]["Path"]) == pack_of(rows[i]["Path"]):
                     continue                    # first pick: same feel from a different pack
                 picks.append(j)
                 break
+            if not want_fresh and not picks:    # small library: settle for the closest sound in the same pack
+                for j in order[:50]:
+                    if j != i and j not in used and sig[j] != sig[i]:
+                        picks.append(j)
+                        break
         return picks
 
-    audit, gal = [], {}
+    audit, gal, totals = [], {}, Counter()
     names = sorted(n for n in os.listdir(local(a.projects)) if n.lower().endswith(".rpp"))
     for name in names:
         tempo, files = parse_rpp(os.path.join(local(a.projects), name))
@@ -144,11 +153,11 @@ def main():
         tonal = [j for j in used if key[j] >= 0 and named.get(rows[j]["Path"], ("", ""))[1].endswith("m") or
                  (key[j] >= 0 and named.get(rows[j]["Path"], ("", ""))[0] and named.get(rows[j]["Path"], ("", ""))[1])]
         pkey = Counter(key[j] for j in tonal).most_common(1)[0][0] if tonal else -1
-        clashes = sorted({rows[j]["Path"].rsplit("\\", 1)[-1] for j in tonal if pkey >= 0 and not key_compat(pkey, key[j])})
-        stretched = sorted({rows[j]["Path"].rsplit("\\", 1)[-1] for j in used
+        clashes = sorted({SC.basename(rows[j]["Path"]) for j in tonal if pkey >= 0 and not key_compat(pkey, key[j])})
+        stretched = sorted({SC.basename(rows[j]["Path"]) for j in used
                             if typ[j] == "loop" and bpm[j] and tempo and not tempo_compat(tempo, bpm[j], 0.12)})
-        packs = Counter("Mars" if "\\mars\\" in rows[j]["Path"] else "NI Lo-fi" if "Samples Library" in rows[j]["Path"]
-                        else "Drum Broker" if "\\drumbroker\\" in rows[j]["Path"] else "other" for j in used)
+        packs = Counter(source_of(rows[j]["Path"]) or "other" for j in used)
+        totals.update(packs)
         with open(os.path.join(out_dir, os.path.splitext(name)[0] + ".tsv"), "w", encoding="utf-8", newline="") as fh:
             fh.write("original\ttype\talt\talt_bpm\talt_type\n")
             taken = set(used)
@@ -158,7 +167,7 @@ def main():
                     fh.write(f"{rows[j]['Path']}\t{typ[j]}\t{rows[k]['Path']}\t{bpm[k] or ''}\t{typ[k]}\n")
         audit.append({"project": name, "tempo": tempo, "key": KEYS[pkey] if pkey >= 0 else "",
                       "library_sounds": len(used), "other_audio": outside,
-                      "drum_broker": packs.get("Drum Broker", 0), "mars": packs.get("Mars", 0), "ni_lofi": packs.get("NI Lo-fi", 0),
+                      "sources_used": "; ".join(f"{k} {v}" for k, v in packs.most_common()),
                       "key_clashes": "; ".join(clashes[:6]), "loops_far_off_tempo": "; ".join(stretched[:6])})
         gal[name[:-4]] = [rows[j]["Path"] for j in used]
 
@@ -173,7 +182,10 @@ def main():
     clash_n = sum(1 for r in audit if r["key_clashes"])
     tempo_n = sum(1 for r in audit if r["loops_far_off_tempo"])
     print(f"  {clash_n} projects have a sound in a clashing key, {tempo_n} have a loop stretched more than 12%")
-    print(f"  sounds used: Drum Broker {sum(r['drum_broker'] for r in audit)}, Mars {sum(r['mars'] for r in audit)}, NI Lo-fi {sum(r['ni_lofi'] for r in audit)}")
+    print("  sounds used by source: " + ", ".join(f"{k} {v}" for k, v in totals.most_common()))
+    unused = [s["name"] for s in cfg["sample_folders"] if s["name"] not in totals]
+    if unused:
+        print("  never used in a project yet: " + ", ".join(sorted(set(unused))))
 
 
 if __name__ == "__main__":

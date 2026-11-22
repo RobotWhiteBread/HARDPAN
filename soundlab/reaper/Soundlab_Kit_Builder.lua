@@ -1,4 +1,4 @@
--- HARDPAN_Kit_Builder.lua
+-- Soundlab_Kit_Builder.lua
 -- Turns a kit (saved from the Sound Galaxy, or written by make_kits.py) into a
 -- 32 bar session: intro, verse, hook, verse, outro, drums patterned in a groove
 -- style, loops stretched to one tempo, and a starting mix.
@@ -9,19 +9,27 @@
 --   # style=boombap        (boombap, house, electro, halftime)
 --   # bpm=90
 --   # save=machine1_sp1200
--- HARDPAN_Build_All_Kits.lua sets HP_KITFILE and HP_BATCH to build many at once.
+-- Soundlab_Build_All_Kits.lua sets HP_KITFILE and HP_BATCH to build many at once.
 
 local R = reaper
-local OUT = [[C:\HARDPAN\studio_setup\projects\]]
-local DL = (os.getenv("USERPROFILE") or [[C:\Users\basch]]) .. [[\Downloads\]]
+local SEP = package.config:sub(1, 1)
+local HERE = (({ R.get_action_context() })[2] or ""):match("^(.*[\\/])") or ""
+pcall(dofile, HERE .. "soundlab_paths.lua")           -- written by setup from soundlab.json
+SOUNDLAB = SOUNDLAB or {}
+local HOMEDIR = os.getenv("USERPROFILE") or os.getenv("HOME") or ""
+local OUT = SOUNDLAB.projects or (R.GetResourcePath() .. SEP .. "soundlab_projects" .. SEP)
+local DL = SOUNDLAB.downloads or (HOMEDIR .. SEP .. "Downloads" .. SEP)
 
 local function exists(p) local f = io.open(p, "rb"); if f then f:close(); return true end; return false end
 
 -- which kit ---------------------------------------------------------------
 local kitfile = HP_KITFILE
 if not kitfile then
-  kitfile = DL .. "hardpan_kit.txt"
-  for n = 1, 60 do local p = DL .. "hardpan_kit (" .. n .. ").txt"; if exists(p) then kitfile = p end end
+  kitfile = DL .. "soundlab_kit.txt"
+  for _, stem in ipairs({ "hardpan_kit", "soundlab_kit" }) do
+    if exists(DL .. stem .. ".txt") then kitfile = DL .. stem .. ".txt" end
+    for n = 1, 60 do local p = DL .. stem .. " (" .. n .. ").txt"; if exists(p) then kitfile = p end end
+  end
   if R.GetUserFileNameForRead then
     local ok, pick = R.GetUserFileNameForRead(kitfile, "Pick a kit", "txt")
     if not ok then return end
@@ -29,7 +37,7 @@ if not kitfile then
   end
 end
 if not exists(kitfile) then
-  if not HP_BATCH then R.ShowMessageBox("No kit found. Save one from the Sound Galaxy first.", "HARDPAN", 0) end
+  if not HP_BATCH then R.ShowMessageBox("No kit found. Save one from the Sound Galaxy first.", "Soundlab", 0) end
   HP_RESULT = "no kit file"; return
 end
 
@@ -51,7 +59,7 @@ for raw in io.lines(kitfile) do
 end
 local function has(t) return kit[t] and #kit[t] > 0 end
 if not next(kit) then
-  if not HP_BATCH then R.ShowMessageBox("None of the kit files were found on disk.", "HARDPAN", 0) end
+  if not HP_BATCH then R.ShowMessageBox("None of the kit files were found on disk.", "Soundlab", 0) end
   HP_RESULT = "no sounds found"; return
 end
 
@@ -100,7 +108,7 @@ local function item(tr, file, pos, len, vol, loop, rate)
   local tk = R.AddTakeToMediaItem(it)
   local src = R.PCM_Source_CreateFromFile(file)
   R.SetMediaItemTake_Source(tk, src)
-  R.GetSetMediaItemTakeInfo_String(tk, "P_NAME", file:match("([^\\]+)$"), true)
+  R.GetSetMediaItemTakeInfo_String(tk, "P_NAME", file:match("([^\\/]+)$"), true)
   rate = rate or 1
   if math.abs(rate - 1) > 0.001 then
     R.SetMediaItemTakeInfo_Value(tk, "D_PLAYRATE", rate)
@@ -235,11 +243,12 @@ R.SetEditCurPos(0, true, false)
 R.UpdateArrange()
 
 local name = (head.save or ("galaxy_kit_" .. os.date("%m%d_%H%M"))) .. ".rpp"
+if R.RecursiveCreateDirectory then R.RecursiveCreateDirectory(OUT, 0) end
 if R.Main_SaveProjectEx then R.Main_SaveProjectEx(0, OUT .. name, 0) end
 HP_RESULT = string.format("%s: %s at %d BPM", name, head.style or "boombap", math.floor(BPM + 0.5))
 if not HP_BATCH then
   local msg = string.format("Built %s at %d BPM from %s\nSaved as %s\nPress SPACE to play.",
     head.style or "boombap", math.floor(BPM + 0.5), kitfile:match("([^\\/]+)$"), name)
   if #missing > 0 then msg = msg .. "\n\n" .. #missing .. " kit file(s) not found on disk." end
-  R.ShowMessageBox(msg, "HARDPAN Kit Builder", 0)
+  R.ShowMessageBox(msg, "Soundlab Kit Builder", 0)
 end

@@ -1,4 +1,5 @@
 """
+EXAMPLE (needs Samples From Mars in a sample folder).
 Mars remixes: copies of your songs with the drums rebuilt from Samples From Mars.
   * every drum hit (kick, snare, clap, hat, perc) goes to its closest Mars hit
   * every break or drum loop goes to a Mars drum loop near the same tempo, and
@@ -11,11 +12,12 @@ never touched; copies go to projects\\remix_mars\\<song>_mars.rpp.
 """
 import argparse, csv, math, os, random, re
 import numpy as np
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+import soundlab_config as SC
 import soundfile as sf
 
-DEFAULT = ["afterdark2_satin_sheets-1", "atmos1_overcast-1", "dance5_bring_it_back-1", "deltron1_epic-1",
-           "dilla_monks-1", "jazz_hop_pines-1", "lucy_ford_take2_porch_light-1", "nightscore2_glass_room-1",
-           "spacecowboy1_saucer_sandhills-1", "machine2_power_grid-1", "octagon_giants-1", "aesop1_blockhead-1"]
+DEFAULT = []          # list song file names (without .rpp) to remix just those; empty means all
 DRUMWORDS = r"kick|snare|clap|hat|\bhh\b|\bbd\b|\bsd\b|perc|drum|break|beat|groove|shaker|tamb|conga|bongo|tom\b|rim|cymbal|ride|crash"
 MELODIC = r"melod|keys|piano|rhodes|organ|guitar|bass(?! ?drum)|synth|pad|string|vocal|vox|chord|stem|horn|brass|sax|flute"
 
@@ -57,8 +59,9 @@ def role(path):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--projects", default=r"C:\HARDPAN\studio_setup\projects")
-    ap.add_argument("--lib", default=r"C:\HARDPAN\studio_setup\samples\_library")
+    cfg = SC.load()
+    ap.add_argument("--projects", default=cfg["projects"])
+    ap.add_argument("--lib", default=cfg["library"])
     ap.add_argument("--all", action="store_true")
     ap.add_argument("--map-from", default="")
     ap.add_argument("--map-to", default="")
@@ -69,14 +72,14 @@ def main():
     os.makedirs(out_dir, exist_ok=True)
 
     named = {}
-    with open(local(a.lib + "\\catalog.csv"), newline="", encoding="utf-8-sig") as fh:
+    with open(local(os.path.join(a.lib, "catalog.csv")), newline="", encoding="utf-8-sig") as fh:
         for c in csv.DictReader(fh):
             if c["BPM"]:
                 named[c["Path"].lower()] = fl(c["BPM"])
     rows, seen = [], set()
-    with open(local(a.lib + "\\features.csv"), newline="", encoding="utf-8") as fh:
+    with open(local(os.path.join(a.lib, "features.csv")), newline="", encoding="utf-8") as fh:
         for r in csv.DictReader(fh):
-            if r["error"] or r["Path"].rsplit("\\", 1)[-1].startswith("._") or "powwow" in r["Path"].lower():
+            if r["error"] or SC.basename(r["Path"]).startswith("._") or SC.excluded(r["Path"], cfg):
                 continue
             rows.append(r)
     lookup = {r["Path"].lower(): i for i, r in enumerate(rows)}
@@ -117,8 +120,8 @@ def main():
         order = [j for j in cand[np.argsort(d)][:6] if j not in taken] or list(cand[np.argsort(d)][:1])
         return int(order[min(len(order) - 1, rnd.randrange(3))])
 
-    names = sorted(n[:-4] for n in os.listdir(pdir) if n.endswith("-1.rpp")) if a.all else DEFAULT
-    names = [n for n in names if not n.startswith("spirit")]
+    names = DEFAULT if (DEFAULT and not a.all) else sorted(n[:-4] for n in os.listdir(pdir)
+             if n.lower().endswith(".rpp") and not n.lower().endswith(("_mars.rpp", "_upgrade.rpp")))
     total_hits = total_loops = 0
     for name in names:
         rpp = os.path.join(pdir, name + ".rpp")
@@ -195,7 +198,7 @@ def main():
             for q in block:                              # loops should wrap if the new one is shorter
                 if out[q].strip().startswith("LOOP "):
                     out[q] = out[q].replace("LOOP 0", "LOOP 1")
-        dest = os.path.join(out_dir, name.replace("-1", "") + "_mars.rpp")
+        dest = os.path.join(out_dir, re.sub(r"-\d+$", "", name) + "_mars.rpp")
         with open(dest, "w", encoding="utf-8", newline="") as fh:
             fh.write("\n".join(out))
         total_hits += hits

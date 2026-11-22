@@ -1,40 +1,107 @@
-# HARDPAN soundlab
+# soundlab
 
-Tools that measure a sample library and use the numbers to explore sounds,
-build tracks in REAPER, and check mixes.
+Your whole sample library on one 3D map. soundlab listens to every sample you
+own, measures how it sounds, and lays them all out so similar sounds sit
+together. Hover to hear, click to find the closest matches, drop favorites in a
+cart, and build kits and songs in REAPER from what you find.
 
-| Part | What it does | Run |
-|---|---|---|
-| Analyzer | Measures every sample: tempo, key, note, brightness, punch, low end, stereo width, noise, a sound-type guess and character tags. Resumable. | `Run-SampleAnalysis.ps1` (`-Test` for 300 files) |
-| Sound Galaxy | Every sample as a point in 3D. Similarity islands with names ("lofi dark loops"), or pick your own axes. Hover to hear and see the waveform; click for a web to the 14 closest sounds, Drift to wander sound to sound, Match key and tempo, and Build a kit around this. Pack names, one-of-each to hide the extra copies, and Gaps to show the kinds of sounds you do not have yet. Save a kit for REAPER. | `galaxy\Open-Galaxy.ps1` (add `-Waveforms` the first time) |
-| Kit Builder | Turns a kit into a 32 bar REAPER session in one of four grooves (boombap, house, electro, halftime): intro, verses, hook, outro, loops stretched to one tempo, a starting mix. | REAPER: `reaper\HARDPAN_Kit_Builder.lua` |
-| Machine Tour | Eight new songs, one per classic drum machine (SP-1200, MPC60, LinnDrum, 909, 808, DMX, CR-78, Drumulator), with a melodic loop near the tempo and bass and keys in its key. | `reaper\Make-New-Tracks.ps1`, then REAPER: `HARDPAN_Build_All_Kits.lua` |
-| Mars Remixes | Copies of your songs with the drums rebuilt from Samples From Mars: hits matched by sound, breaks swapped for Mars loops near the same tempo with every chop re-timed. Originals untouched. | `reaper\Make-New-Tracks.ps1` |
-| Project Upgrade | Adds two library alternatives to every sample in a song as extra takes (press T to flip). | REAPER: `reaper\HARDPAN_Upgrade_Project.lua` |
-| Mix Check | Report page with a spinnable 3D spectrogram, loudness (BS.1770), true peak, punch, loudness range, low end in mono, stereo width, tonal balance and kick and bass clash. | `mixmath\Check-Mix.ps1 song.wav` |
+![The Sound Galaxy](demos/post1_galaxy.png)
 
-## Flow
+It runs on your own machine, on your own files. Nothing is uploaded.
 
-1. `studio_setup\scripts\Build-SampleLibrary.ps1` builds `_library` and `catalog.csv` (hard links, no extra space).
-2. `Run-SampleAnalysis.ps1` measures every file into `features.csv`.
-3. `galaxy\Open-Galaxy.ps1` turns that into the Galaxy and opens it.
-4. Pick sounds, Save kit, run the Kit Builder in REAPER.
-5. Render the song, run Mix Check, fix what it flags.
+## What you get
 
-## Reference tracks
+| Tool | What it does |
+|---|---|
+| **Library builder** | Catalogs every sample in your folders (type, pack, drum machine, tempo and key from the file names) and makes browse folders for REAPER's Media Explorer out of hard links, so they take no extra disk space. |
+| **Analyzer** | Measures every sound: tempo, key, note, brightness, punch, low end, stereo width, noise, attack. Guesses what it is (kick, hat, loop, bass...) and tags its character (dark, lofi, punchy...). Resumable, uses all your CPU cores. |
+| **Sound Galaxy** | Every sample as a point in 3D. Similar sounds form named islands ("lofi dark loops"), or pick your own axes. Hover to hear and see the waveform. Click for a web to the 14 closest sounds. Drift from sound to sound. Match key and tempo. Build a kit around one sound. Find duplicate files and gaps in your collection. |
+| **Cart** | Shift+click (or Cart mode, key C) drops sounds you like into a cart while you explore. It is remembered between visits. Save it, then lay it out in REAPER or get a Cart folder for the Media Explorer. |
+| **Kit Builder** (REAPER) | Turns a saved kit into a 32 bar song: intro, verses, hook, outro, in one of four grooves (boom bap, house, electro, half-time), loops stretched to one tempo, a starting mix. |
+| **Project audit and upgrade** (REAPER) | Reads your REAPER projects, flags loops stretched far from their tempo, and adds two library alternatives to every sample as extra takes (select an item, press T to flip). Your originals are never overwritten. |
+| **Mix Check** | A report for any song: loudness (BS.1770), true peak, punch, loudness range, low end in mono, stereo width, tonal balance against your reference tracks, and kick and bass clash, with a spinnable 3D spectrogram. |
 
-Put a few songs whose sound you like in `soundlab\refs` and pass `-Refs` to
-Mix Check. Their tonal balance becomes the target instead of the built-in rough
-guide. They are for comparison only and are never committed.
+## Quick start (about 5 minutes plus measuring time)
 
-## Data stays local
+You need [Python 3](https://www.python.org/downloads/) and, for the song tools, [REAPER](https://www.reaper.fm/).
 
-Samples, `catalog.csv`, `features.csv`, the Galaxy data file, reference tracks
-and mix reports all stay on this machine. Sample packs are licensed for making
-music, not for redistribution, so only code lives in this repo.
+**Windows** (PowerShell, in the soundlab folder):
+```powershell
+powershell -ExecutionPolicy Bypass -File .\Setup.ps1 -Samples "D:\Samples"
+py soundlab.py all
+```
 
-## Needs
+**Mac or Linux:**
+```bash
+./setup.sh ~/Music/Samples
+python3 soundlab.py all
+```
 
-Python 3 with numpy, scipy and soundfile (the analyzer installs them). The
-Galaxy and Mix Check pages load three.js from unpkg, so the first open needs
-internet.
+`all` builds the library, measures every sound, makes the waveforms and opens
+the Galaxy in your browser. Measuring runs at roughly 50 to 100 sounds per second
+on a modern laptop (about 30 minutes for 170,000 samples). Stop it any time and
+run it again; it continues where it left off.
+
+Have samples in more than one place? Open `soundlab.json` and add them:
+```json
+"sample_folders": [
+  { "name": "Drum packs", "path": "D:/Samples/Drums" },
+  { "name": "Splice",     "path": "~/Splice/sounds" }
+]
+```
+
+## Everyday commands
+
+```
+python soundlab.py build                 after adding new packs
+python soundlab.py analyze               measures only the new sounds
+python soundlab.py galaxy                refresh and open the Galaxy (add --waveforms after new packs)
+python soundlab.py check song.wav        mix report (add --refs myrefs to compare against songs you like)
+python soundlab.py audit                 check your REAPER projects and find alternatives
+python soundlab.py cart                  newest saved cart -> a Cart folder for REAPER's Media Explorer
+```
+
+## In REAPER
+
+Load these with **Actions > New action > Load ReaScript**. They find your folders
+through `reaper/soundlab_paths.lua`, which setup writes from `soundlab.json`.
+
+| Script | Use |
+|---|---|
+| `reaper/Soundlab_Kit_Builder.lua` | Build a song from the newest kit saved in the Galaxy |
+| `reaper/Soundlab_Build_All_Kits.lua` | Build every kit in `<projects>/kits`, one tab each |
+| `reaper/Soundlab_Cart_To_Project.lua` | Lay out your saved cart on tracks grouped by type |
+| `reaper/Soundlab_Upgrade_Project.lua` | Add library alternatives to every sample as takes (run `audit` first) |
+
+## Galaxy keys
+
+| | |
+|---|---|
+| Hover | hear it, see its waveform |
+| Click | select it: closest matches, island, copies, kit ideas |
+| Shift+click, or C for Cart mode | add to cart |
+| Space | play or stop |
+| Esc | clear the selection |
+
+## Examples
+
+`examples/` holds tools built around specific commercial packs. They show what
+you can do with the pieces above; they need those packs to run.
+
+| Example | Needs |
+|---|---|
+| `machine_tour/make_kits.py`: eight songs, one per classic drum machine | Samples From Mars machine packs |
+| `mars_remix/remix_projects.py`: rebuild your songs' drums from Mars, re-timing every chop | Samples From Mars |
+| `stoner_doom/Soundlab_Doom.lua`: six varispeed doom songs | LoudFoundry Stoner Doom Rock pack |
+| `galaxy_demo/make_demo.py`: the vertical video and photos below | ffmpeg, Pillow, sounds of your choice |
+
+## Privacy and licenses
+
+Your settings, catalog, measurements, Galaxy data, reference tracks and reports
+stay on your machine; `.gitignore` keeps them out of git. Sample packs are
+usually licensed for making music, not for sharing, so never commit audio.
+
+The Galaxy and Mix Check pages load [three.js](https://threejs.org/) (MIT) from
+a CDN, so the first open needs internet.
+
+![Islands](demos/post2_islands.png)

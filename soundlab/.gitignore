@@ -1,7 +1,17 @@
-# measured data and sample lists stay on this machine
-*.csv
-*.json
-*.log
+# personal settings and everything measured from your own samples stay on your machine
+soundlab.json
+reaper/soundlab_paths.lua
 galaxy/data/
 refs/
+*.csv
+*.json
+!soundlab.example.json
+*.log
 *_mixcheck.html
+__pycache__/
+*.wav
+*.aif
+*.aiff
+*.flac
+*.mp3
+*.mp4

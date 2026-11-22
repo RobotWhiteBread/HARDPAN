@@ -4,10 +4,14 @@ Drums come from that machine's Samples From Mars pack; a melodic loop near the
 target tempo; bass and keys whose notes sit in the loop's key.
 
   python make_kits.py
-Kits land in C:\\HARDPAN\\studio_setup\\projects\\kits. Build them all in REAPER
-with HARDPAN_Build_All_Kits.lua.
+EXAMPLE: needs the Samples From Mars packs (any of the machine packs below) in
+one of your sample folders. Kits land in <projects>/kits; build them all in
+REAPER with Soundlab_Build_All_Kits.lua.
 """
 import argparse, csv, os, random, re
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+import soundlab_config as SC
 from collections import defaultdict
 
 NOTES = ["C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"]
@@ -64,8 +68,9 @@ def tempo_ok(a, b, tol=0.06):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--lib", default=r"C:\HARDPAN\studio_setup\samples\_library")
-    ap.add_argument("--out", default=r"C:\HARDPAN\studio_setup\projects\kits")
+    cfg = SC.load()
+    ap.add_argument("--lib", default=cfg["library"])
+    ap.add_argument("--out", default=os.path.join(cfg["projects"], "kits"))
     ap.add_argument("--map-from", default="")
     ap.add_argument("--map-to", default="")
     ap.add_argument("--seed", type=int, default=7)
@@ -74,15 +79,15 @@ def main():
     rnd = random.Random(a.seed)
 
     named = {}
-    with open(local(a.lib + "\\catalog.csv"), newline="", encoding="utf-8-sig") as fh:
+    with open(local(os.path.join(a.lib, "catalog.csv")), newline="", encoding="utf-8-sig") as fh:
         for c in csv.DictReader(fh):
             named[c["Path"]] = (fl(c["BPM"]), key_index(c["Key"]))
     rows, seen = [], set()
-    with open(local(a.lib + "\\features.csv"), newline="", encoding="utf-8") as fh:
+    with open(local(os.path.join(a.lib, "features.csv")), newline="", encoding="utf-8") as fh:
         for r in csv.DictReader(fh):
-            name = r["Path"].rsplit("\\", 1)[-1]
+            name = SC.basename(r["Path"])
             sig = (r["dur_s"], r["rms_db"], r["peak_db"], r["centroid_hz"])
-            if r["error"] or name.startswith("._") or "powwow" in r["Path"].lower() or sig in seen:
+            if r["error"] or name.startswith("._") or SC.excluded(r["Path"], cfg) or sig in seen:
                 continue
             seen.add(sig)
             nb, nk = named.get(r["Path"], (0, -1))

@@ -1,5 +1,5 @@
 """
-HARDPAN Sound Galaxy demo maker: a beat built from the library, a vertical
+EXAMPLE: Sound Galaxy demo maker (edit PARTS below to point at sounds you own): a beat built from the library, a vertical
 Reel where every sound lights up its spot in the Galaxy as it plays, and
 square-ish photo posts.
 
@@ -15,10 +15,12 @@ from scipy import ndimage, signal
 from PIL import Image, ImageDraw, ImageFont
 
 HOME = os.path.expanduser("~")
-S = os.environ.get("HP_SAMPLES", r"C:\HARDPAN\studio_setup\samples")
-GAL = os.environ.get("HP_GALAXY", r"K:\HARDPAN\soundlab\galaxy\data")
-OUT = os.environ.get("HP_DEMOS", r"C:\HARDPAN\studio_setup\demos")
-WIN = r"C:\HARDPAN\studio_setup\samples"           # how paths are written inside the Galaxy data
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+import soundlab_config as SC
+_cfg = SC.load()
+S = os.environ.get("HP_SAMPLES", _cfg["sample_folders"][0]["path"])
+GAL = os.environ.get("HP_GALAXY", os.path.join(SC.HERE, "galaxy", "data"))
+OUT = os.environ.get("HP_DEMOS", os.path.join(_cfg["projects"], "demos"))
 FRAMES = os.environ.get("HP_FRAMES", os.path.join(OUT, "_frames"))
 SR, BPM, FPS = 44100, 91, 30
 BAR = 240 / BPM
@@ -256,8 +258,8 @@ def render_frames(a0, a1):
         caption("and its closest matches.", 148, font(36), fade(12.4, 19))
         caption("Built from my own library.", 100, font(36), fade(19.5, 26))
         caption("Analyzed in 35 minutes.", 148, font(36), fade(19.9, 26))
-        caption("HARDPAN", H * 0.40, font(72), fade(total - 4.2, total + 1))
-        caption("SOUND GALAXY", H * 0.40 + 84, font(40), fade(total - 3.8, total + 1))
+        caption("SOUND", H * 0.40, font(72), fade(total - 4.2, total + 1))
+        caption("GALAXY", H * 0.40 + 84, font(40), fade(total - 3.8, total + 1))
         im.save(os.path.join(FRAMES, f"f{fi:05d}.png"))
     print(f"frames {a0}..{min(a1, nfr) - 1} of {nfr}")
 

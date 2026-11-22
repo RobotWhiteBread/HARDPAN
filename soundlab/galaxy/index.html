@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>HARDPAN Sound Galaxy</title>
+<title>Sound Galaxy</title>
 <style>
   :root { --bg:#07090d; --panel:rgba(14,18,26,.9); --line:#232b38; --text:#d9e1ec; --dim:#7c8798; --accent:#f2a93b; --good:#4ef0b0; }
   * { box-sizing:border-box; }
@@ -12,6 +12,8 @@
   #left { top:12px; left:12px; width:262px; max-height:calc(100% - 24px); overflow:auto; }
   #right { top:12px; right:12px; width:340px; max-height:calc(100% - 24px); overflow:auto; display:none; }
   #kitbox { bottom:12px; right:364px; width:300px; max-height:45%; overflow:auto; display:none; }
+  #cartbox { bottom:36px; left:288px; width:300px; max-height:45%; overflow:auto; display:none; border-color:#2f6b4f; }
+  body.cartmode #c { cursor:copy; }
   #tip { position:fixed; pointer-events:none; background:#000d; border:1px solid var(--line); padding:6px 8px; border-radius:6px; font-size:12px; display:none; max-width:420px; }
   #tip canvas { display:block; margin-top:4px; }
   #status { position:fixed; bottom:12px; left:12px; color:var(--dim); font-size:12px; }
@@ -49,7 +51,7 @@
 <canvas id="c"></canvas>
 
 <div id="left" class="panel">
-  <h1>HARDPAN SOUND GALAXY</h1>
+  <h1>SOUND GALAXY</h1>
   <div class="hint" id="total" style="margin-top:0"></div>
 
   <h2>Map</h2>
@@ -67,6 +69,7 @@
   <label class="row">Pack names <input type="checkbox" id="packNames"></label>
   <label class="row">One of each (hide copies) <input type="checkbox" id="oneEach"></label>
   <label class="row">Play on hover <input type="checkbox" id="hoverPlay" checked></label>
+  <label class="row">Cart mode: click adds (C) <input type="checkbox" id="cartMode"></label>
 
   <h2>Find</h2>
   <input type="text" id="search" placeholder="name or pack, e.g. sp1200 kick">
@@ -82,7 +85,7 @@
   <label class="row">Look at <select id="gapType"><option value="">pick a type</option></select></label>
   <div id="gaps"></div>
 
-  <div class="hint">Drag to orbit, scroll to zoom, right-drag to pan. Hover to hear. Click a dot for its closest matches. Esc clears, Space plays or stops.</div>
+  <div class="hint">Drag to orbit, scroll to zoom, right-drag to pan. Hover to hear. Click a dot for its closest matches. Shift+click (or Cart mode) drops it in your cart. Esc clears, Space plays or stops.</div>
 </div>
 
 <div id="right" class="panel">
@@ -96,6 +99,7 @@
   <div class="btns">
     <button class="primary" id="playBtn">Play</button>
     <button id="kitBtn">Add to kit</button>
+    <button id="cartBtn">Add to cart</button>
     <button id="driftBtn">Drift</button>
     <button id="matchBtn">Match key and tempo</button>
     <button id="fillBtn">Build a kit around this</button>
@@ -114,7 +118,14 @@
   <h2 style="margin-top:0">Kit <span id="kitCount"></span></h2>
   <div class="list" id="kit"></div>
   <div class="btns"><button class="primary" id="saveKit">Save kit</button><button id="clearKit">Clear</button></div>
-  <div class="hint">Saves hardpan_kit.txt to Downloads. Then run HARDPAN_Kit_Builder.lua in REAPER.</div>
+  <div class="hint">Saves soundlab_kit.txt to Downloads. Then run Soundlab_Kit_Builder.lua in REAPER.</div>
+</div>
+
+<div id="cartbox" class="panel">
+  <h2 style="margin-top:0">Cart <span id="cartCount"></span></h2>
+  <div class="list" id="cart"></div>
+  <div class="btns"><button class="primary" id="saveCart">Save cart</button><button id="copyCart">Copy paths</button><button id="cartToKit">Cart to kit</button><button id="clearCart">Empty</button></div>
+  <div class="hint">The cart is remembered between visits. Save cart writes soundlab_cart.txt to Downloads; Soundlab_Cart_To_Project.lua lays it out in REAPER, and python soundlab.py cart makes a Cart folder for REAPER's Media Explorer.</div>
 </div>
 
 <div id="tip"></div>
@@ -366,8 +377,11 @@ function pick(cx, cy, radius = 9) {
 
 // ---------- audio ----------
 const audio = new Audio();
-const pathOf = i => G.dirs[G.d[i]] + "\\" + G.n[i];
-const urlOf = i => "file:///" + encodeURI(pathOf(i).replace(/\\/g, "/")).replace(/#/g, "%23").replace(/\?/g, "%3F");
+const pathOf = i => G.dirs[G.d[i]] + G.n[i];
+const urlOf = i => {                                   // Windows C:\... and Mac or Linux /Users/... both become file URLs
+  const p = pathOf(i).replace(/\\/g, "/");
+  return (p.startsWith("/") ? "file://" : "file:///") + encodeURI(p).replace(/#/g, "%23").replace(/\?/g, "%3F");
+};
 function play(i) { audio.pause(); audio.src = urlOf(i); audio.currentTime = 0; audio.play().catch(() => {}); }
 
 // ---------- waveform ----------
@@ -515,8 +529,47 @@ $("clearKit").onclick = () => { kit.length = 0; drawKit(); };
 $("saveKit").onclick = () => {
   const lines = kit.map(j => [typeName(j), G.bpm[j] || "", KEYN(G.key[j]), pathOf(j)].join("\t"));
   const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob(["type\tbpm\tkey\tpath\n" + lines.join("\n")], { type:"text/plain" }));
-  a.download = "hardpan_kit.txt"; a.click();
+  a.download = "soundlab_kit.txt"; a.click();
 };
+
+// ---------- cart: collect sounds you like while you explore ----------
+const pathIndex = new Map();
+function idxOfPath(p) { if (!pathIndex.size) for (let i = 0; i < N; i++) pathIndex.set(pathOf(i), i); return pathIndex.get(p); }
+let cart = [];
+try { cart = JSON.parse(localStorage.getItem("soundlab_cart") || "[]").map(idxOfPath).filter(i => i !== undefined); } catch (e) { cart = []; }
+function keepCart() { try { localStorage.setItem("soundlab_cart", JSON.stringify(cart.map(pathOf))); } catch (e) {} }
+const flashes = [];
+function flash(i) {
+  const m = new THREE.Mesh(new THREE.RingGeometry(2, 2.6, 32), new THREE.MeshBasicMaterial({ color:0x4ef0b0, side:THREE.DoubleSide, transparent:true }));
+  m.position.set(pos[i*3], pos[i*3+1], pos[i*3+2]); scene.add(m); flashes.push({ m, t0: performance.now() });
+}
+function addToCart(i) {
+  if (i < 0) return;
+  play(i);
+  if (cart.includes(i)) return;
+  cart.push(i); keepCart(); drawCart(); flash(i);
+}
+function drawCart() {
+  $("cartbox").style.display = cart.length ? "block" : "none"; $("cartCount").textContent = `(${cart.length})`;
+  $("cart").innerHTML = "";
+  cart.forEach((j, n) => { const d = document.createElement("div");
+    d.innerHTML = `<span class="sw" style="background:${TYPE_COLOR[typeName(j)]||"#888"}"></span>${G.n[j]}<small>remove</small>`;
+    d.onclick = e => { if (e.target.tagName === "SMALL") { cart.splice(n, 1); keepCart(); drawCart(); } else { select(j); flyTo(j); } };
+    d.onmouseenter = () => play(j);
+    $("cart").appendChild(d); });
+}
+function setCartMode(v) { $("cartMode").checked = v; document.body.classList.toggle("cartmode", v); }
+$("cartMode").onchange = e => setCartMode(e.target.checked);
+$("cartBtn").onclick = () => addToCart(sel);
+$("clearCart").onclick = () => { if (confirm("Empty the cart?")) { cart.length = 0; keepCart(); drawCart(); } };
+$("cartToKit").onclick = () => { for (const j of cart) if (!kit.includes(j)) kit.push(j); drawKit(); };
+$("copyCart").onclick = () => { const t = document.createElement("textarea"); t.value = cart.map(pathOf).join("\n"); document.body.appendChild(t); t.select(); document.execCommand("copy"); t.remove(); $("copyCart").textContent = "Copied"; setTimeout(() => $("copyCart").textContent = "Copy paths", 1200); };
+$("saveCart").onclick = () => {
+  const lines = cart.map(j => [typeName(j), G.bpm[j] || "", KEYN(G.key[j]), pathOf(j)].join("\t"));
+  const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob(["type\tbpm\tkey\tpath\n" + lines.join("\n")], { type:"text/plain" }));
+  a.download = "soundlab_cart.txt"; a.click();
+};
+drawCart();
 
 // ---------- mouse ----------
 let down = null, lastHover = -1, hoverT = 0;
@@ -524,7 +577,9 @@ const tipWave = document.createElement("canvas");
 renderer.domElement.addEventListener("pointerdown", e => down = [e.clientX, e.clientY]);
 renderer.domElement.addEventListener("pointerup", e => {
   if (!down || Math.hypot(e.clientX-down[0], e.clientY-down[1]) > 4) return;
-  const i = pick(e.clientX, e.clientY); stopDrift(); select(i);
+  const i = pick(e.clientX, e.clientY);
+  if ($("cartMode").checked || e.shiftKey) { addToCart(i); return; }
+  stopDrift(); select(i);
 });
 renderer.domElement.addEventListener("pointermove", e => {
   const now = performance.now(); if (now - hoverT < 70 || e.buttons) return; hoverT = now;
@@ -541,6 +596,7 @@ renderer.domElement.addEventListener("pointermove", e => {
 addEventListener("keydown", e => {
   if (document.activeElement.tagName === "INPUT") return;
   if (e.key === "Escape") select(-1);
+  if (e.key === "c" || e.key === "C") setCartMode(!$("cartMode").checked);
   if (e.key === " ") {                            // space: stop if something is playing, else replay the selected sound
     e.preventDefault();
     if (!audio.paused && !audio.ended) { audio.pause(); audio.currentTime = 0; }
@@ -564,6 +620,11 @@ if (!TH) $("status").textContent += "  ·  waveforms not made yet (run Open-Gala
   }
   if (fly) { fly.t = Math.min(1, fly.t + 0.04); controls.target.lerpVectors(fly.from, fly.to, fly.t); if (fly.t >= 1) fly = null; }
   ring.lookAt(camera.position);
+  for (let k = flashes.length - 1; k >= 0; k--) {
+    const f = flashes[k], age = (performance.now() - f.t0) / 700;
+    if (age >= 1) { scene.remove(f.m); flashes.splice(k, 1); continue; }
+    f.m.scale.setScalar(1 + age * 3); f.m.material.opacity = 1 - age; f.m.lookAt(camera.position);
+  }
   controls.update(); renderer.render(scene, camera);
 })();
 </script>

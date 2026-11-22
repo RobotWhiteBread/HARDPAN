@@ -4,11 +4,12 @@ from the library catalog and features.csv so index.html can show every sample
 in 3D, with similarity islands, cluster names and duplicates.
 
   python make_galaxy.py
-  python make_galaxy.py --samples C:\\HARDPAN\\studio_setup\\samples
 """
-import argparse, csv, json, math, os, time
+import argparse, csv, json, math, os, re, sys, time
 from collections import Counter, defaultdict
 import numpy as np
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import soundlab_config as SC
 
 FEATS = [  # name, label, how to read it from a features row
     ("bright", "Brightness", lambda r: math.log(max(f(r["centroid_hz"]), 20))),
@@ -152,10 +153,10 @@ def islands(feats, types, chars, packs_of, type_names, pack_names, k=360):
 def main():
     here = os.path.dirname(os.path.abspath(__file__))
     ap = argparse.ArgumentParser()
-    ap.add_argument("--samples", default=r"C:\HARDPAN\studio_setup\samples")
+    cfg = SC.load()
     ap.add_argument("--out", default=os.path.join(here, "data", "galaxy_data.js"))
     a = ap.parse_args()
-    lib = os.path.join(a.samples, "_library")
+    lib = cfg["library"]
     t0 = time.time()
 
     cat = {}
@@ -166,8 +167,8 @@ def main():
     rows = []
     with open(os.path.join(lib, "features.csv"), newline="", encoding="utf-8") as fh:
         for r in csv.DictReader(fh):
-            name = r["Path"].rsplit("\\", 1)[-1]
-            if r["error"] or name.startswith("._") or "powwow" in r["Path"].lower():
+            name = SC.basename(r["Path"])
+            if r["error"] or name.startswith("._") or SC.excluded(r["Path"], cfg):
                 continue
             rows.append(r)
 
@@ -176,7 +177,8 @@ def main():
     out = {"t": [], "p": [], "d": [], "n": [], "bpm": [], "key": [], "note": [], "ch": [], "bars": [], "midi": []}
     for r in rows:
         c = cat.get(r["Path"], {})
-        d, name = r["Path"].rsplit("\\", 1)
+        cut = max(r["Path"].rfind("\\"), r["Path"].rfind("/")) + 1
+        d, name = r["Path"][:cut], r["Path"][cut:]          # folder keeps its trailing separator
         out["t"].append(idx(types, r["sound_guess"] or "other"))
         out["p"].append(idx(packs, (c.get("Source", "") + " | " + c.get("Pack", "")).strip(" |")))
         out["d"].append(idx(dirs, d))

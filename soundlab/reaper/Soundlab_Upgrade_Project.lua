@@ -1,4 +1,4 @@
--- HARDPAN_Upgrade_Project.lua
+-- Soundlab_Upgrade_Project.lua
 -- Adds two library alternatives to every sample in a project as extra TAKES,
 -- so you can audition new sounds without losing the originals.
 -- The original stays the active take. Select an item and press T to cycle
@@ -7,8 +7,13 @@
 -- Needs: run project_audit.py first (it writes projects\_upgrades\*.tsv).
 
 local R = reaper
-local DIR = [[C:\HARDPAN\studio_setup\projects\]]
-local UP = DIR .. [[_upgrades\]]
+local SEP = package.config:sub(1, 1)
+local HERE = (({ R.get_action_context() })[2] or ""):match("^(.*[\\/])") or ""
+pcall(dofile, HERE .. "soundlab_paths.lua")           -- written by setup from soundlab.json
+SOUNDLAB = SOUNDLAB or {}
+local HOMEDIR = os.getenv("USERPROFILE") or os.getenv("HOME") or ""
+local DIR = SOUNDLAB.projects or (R.GetResourcePath() .. SEP .. "soundlab_projects" .. SEP)
+local UP = DIR .. "_upgrades" .. SEP
 
 local function exists(p) local f = io.open(p, "rb"); if f then f:close(); return true end; return false end
 local function stem(p) return (p:match("([^\\/]+)%.[Rr][Pp][Pp]$") or ""):gsub("_upgrade$", "") end
@@ -52,7 +57,7 @@ local function upgrade_current()
         for n, a in ipairs(alts) do
           local t2 = R.AddTakeToMediaItem(it)
           R.SetMediaItemTake_Source(t2, R.PCM_Source_CreateFromFile(a.path))
-          R.GetSetMediaItemTakeInfo_String(t2, "P_NAME", "ALT " .. n .. ": " .. a.path:match("([^\\]+)$"), true)
+          R.GetSetMediaItemTakeInfo_String(t2, "P_NAME", "ALT " .. n .. ": " .. a.path:match("([^\\/]+)$"), true)
           local r2, p2 = rate, pp
           if a.type == "loop" and a.bpm and a.bpm > 0 then
             local fit = tempo / a.bpm
@@ -68,7 +73,7 @@ local function upgrade_current()
       end
     end
   end
-  R.Undo_EndBlock("HARDPAN: add library alternatives as takes", -1)
+  R.Undo_EndBlock("Soundlab: add library alternatives as takes", -1)
   R.UpdateArrange()
   local out = DIR .. name .. "_upgrade.rpp"
   R.Main_SaveProjectEx(0, out, 0)
@@ -77,7 +82,7 @@ end
 
 local choice = R.ShowMessageBox(
   "Add library alternatives as takes.\n\nYes = only the open project\nNo = every project in the projects folder (save your work first; projects open one by one in this tab)\n\nOriginals are never overwritten; each result saves as <name>_upgrade.rpp.",
-  "HARDPAN Upgrade", 3)
+  "Soundlab Upgrade", 3)
 if choice == 2 then return end
 
 local report = {}
@@ -99,4 +104,4 @@ else
   end
 end
 if #report > 12 then local n = #report; report = { n .. " projects upgraded. Open any *_upgrade.rpp to listen." } end
-R.ShowMessageBox(table.concat(report, "\n") .. "\n\nSelect an item and press T to hear the next take, Shift+T to go back.\nAlternatives are named ALT 1 and ALT 2 on each item.", "HARDPAN Upgrade", 0)
+R.ShowMessageBox(table.concat(report, "\n") .. "\n\nSelect an item and press T to hear the next take, Shift+T to go back.\nAlternatives are named ALT 1 and ALT 2 on each item.", "Soundlab Upgrade", 0)

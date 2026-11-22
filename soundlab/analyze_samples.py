@@ -1,7 +1,7 @@
 """
-HARDPAN sample analyzer
-Listens to every file in _library\\catalog.csv by measuring it, and writes
-_library\\features.csv (one row per file). Resumable: rerun and it picks up
+soundlab sample analyzer
+Step 2: measure every file in the library catalog (made by build_library.py) and write
+features.csv in your library folder (one row per file). Resumable: rerun and it picks up
 where it stopped. Needs: numpy, soundfile, scipy.
 
   python analyze_samples.py                      (everything)
@@ -14,7 +14,8 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 import numpy as np
 import soundfile as sf
 
-ROOT = r"C:\HARDPAN\studio_setup\samples"
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import soundlab_config as SC
 NOTES = ["C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"]
 # Krumhansl-Kessler key profiles
 MAJ = np.array([6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88])
@@ -256,8 +257,9 @@ def analyze(path):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--catalog", default=os.path.join(ROOT, "_library", "catalog.csv"))
-    ap.add_argument("--out", default=os.path.join(ROOT, "_library", "features.csv"))
+    cfg = SC.load()
+    ap.add_argument("--catalog", default=SC.lib_file("catalog.csv", cfg))
+    ap.add_argument("--out", default=SC.lib_file("features.csv", cfg))
     ap.add_argument("--workers", type=int, default=max(1, (os.cpu_count() or 2) - 1))
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--pack", default="")
@@ -269,7 +271,7 @@ def main():
         rows = list(csv.DictReader(fh))
     if a.pack:
         rows = [r for r in rows if a.pack.lower() in r["Pack"].lower()]
-    rows = [r for r in rows if "powwow" not in r["Path"].lower()]
+    rows = [r for r in rows if not SC.excluded(r["Path"], cfg)]
 
     done = set()
     if os.path.exists(a.out):
