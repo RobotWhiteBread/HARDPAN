@@ -12,7 +12,18 @@
   #left { top:12px; left:12px; width:262px; max-height:calc(100% - 24px); overflow:auto; }
   #right { top:12px; right:12px; width:340px; max-height:calc(100% - 24px); overflow:auto; display:none; }
   #kitbox { bottom:12px; right:364px; width:300px; max-height:45%; overflow:auto; display:none; }
-  #cartbox { bottom:36px; left:288px; width:300px; max-height:45%; overflow:auto; display:none; border-color:#2f6b4f; }
+  #cartbox { bottom:36px; left:288px; width:340px; max-height:40%; overflow:auto; display:none; border-color:#2f6b4f; }
+  #cartbox h3 { font-size:11px; color:var(--dim); text-transform:uppercase; letter-spacing:.08em; margin:8px 0 2px; }
+  #cartSlots span { display:inline-block; font-size:11px; border-radius:10px; padding:1px 8px; margin:2px 3px 2px 0; border:1px solid var(--line); }
+  #cartSlots span.full { border-color:#2f6b4f; color:var(--good); }
+  #cartSlots span.empty { border-style:dashed; color:var(--accent); cursor:pointer; }
+  #cartSlots span.empty:hover { border-color:var(--accent); }
+  #cart .star { cursor:pointer; color:#3a4456; width:14px; flex:none; }
+  #cart .star.on { color:#ffd24a; }
+  #cart div.playing { background:#22304a; }
+  #cartVibe .warn { color:#ff9b7a; display:block; }
+  @keyframes bump { 0% { transform:scale(1); } 40% { transform:scale(1.35); color:var(--good); } 100% { transform:scale(1); } }
+  #cartCount.bump { display:inline-block; animation:bump .45s ease; }
   body.cartmode #c { cursor:copy; }
   #tip { position:fixed; pointer-events:none; background:#000d; border:1px solid var(--line); padding:6px 8px; border-radius:6px; font-size:12px; display:none; max-width:420px; }
   #tip canvas { display:block; margin-top:4px; }
@@ -47,6 +58,22 @@
   .gap { font-size:12px; margin:3px 0; color:var(--text); }
   .gap small { color:var(--dim); }
   #wave { width:100%; height:44px; display:block; margin:6px 0; }
+  #shop { top:12px; left:288px; width:340px; max-height:calc(56% - 12px); overflow:auto; border-color:#3a4a63; }
+  #shop.min #shopBody { display:none; }
+  #shop .sl { display:grid; grid-template-columns:76px 1fr 64px; align-items:center; gap:6px; margin:3px 0; font-size:12px; }
+  #shop .sl span:last-child { color:var(--accent); font-size:11px; text-align:right; }
+  #shop .sl input { width:100%; }
+  #shortlist div { padding:3px 6px; border-radius:6px; cursor:pointer; display:grid; grid-template-columns:62px 1fr auto; gap:6px; align-items:center; font-size:12px; }
+  #shortlist div:hover { background:#141b27; }
+  #shortlist div.cur { background:#22304a; outline:1px solid var(--accent); }
+  #shortlist div.liked .nm::before { content:"+ "; color:var(--good); }
+  #shortlist .nm { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  #shortlist small { color:var(--dim); white-space:nowrap; font-size:10.5px; }
+  #shortlist canvas { width:62px; height:18px; }
+  #shopSrc { color:var(--dim); font-size:11.5px; margin:6px 0 2px; }
+  .kbd { display:inline-block; border:1px solid var(--line); border-radius:4px; padding:0 4px; font-size:10.5px; color:var(--text); }
+  #boxRect { position:fixed; border:1px dashed var(--accent); background:rgba(242,169,59,.08); pointer-events:none; display:none; z-index:5; }
+  body.boxmode #c { cursor:crosshair; }
   #legend { position:fixed; bottom:12px; left:50%; transform:translateX(-50%); max-width:min(760px, calc(100% - 640px)); min-width:320px; font-size:12px; padding:8px 12px; }
   #legend b { color:var(--accent); font-weight:600; }
   #legend .lk { color:var(--dim); }
@@ -106,7 +133,7 @@
   <label class="row">Look at <select id="gapType"><option value="">pick a type</option></select></label>
   <div id="gaps"></div>
 
-  <div class="hint">Drag to orbit, scroll to zoom, right-drag to pan. Hover to hear. Click a dot for its closest matches. Shift+click (or Cart mode) drops it in your cart. In Sound types, double-click a galaxy to focus it. Used vs owned shows what your projects actually use. Esc clears, Space plays or stops.</div>
+  <div class="hint">Drag to orbit, scroll to zoom, right-drag to pan. Hover to hear. Click a dot for its closest matches. Shift+click (or Cart mode) drops it in your cart. Find a sound lists matches you can play with the arrow keys; B draws a box on the map. In Sound types, double-click a galaxy to focus it. Used vs owned shows what your projects actually use. Esc clears, Space plays or stops.</div>
 </div>
 
 <div id="right" class="panel">
@@ -137,6 +164,25 @@
 </div>
 
 <div id="legend" class="panel"></div>
+<div id="boxRect"></div>
+
+<div id="shop" class="panel">
+  <div style="display:flex;justify-content:space-between;align-items:center;gap:6px">
+    <h1 style="margin:0">FIND A SOUND</h1>
+    <span><button id="boxBtn" title="Drag a box on the map to list the sounds inside it (B)">Box select (B)</button> <button id="shopMin" title="Hide or show (L)">Hide</button></span>
+  </div>
+  <div id="shopBody">
+    <label class="row" style="margin-top:8px">I need <select id="role"><option value="">any kind of sound</option></select></label>
+    <div id="sliders"></div>
+    <label class="row">Key <span><select id="shopKey" style="width:84px"><option value="">any</option></select> <label style="font-size:11px"><input type="checkbox" id="shopKeyFits" checked> or fits</label></span></label>
+    <label class="row">Tempo <span><input type="text" id="shopBpm" placeholder="e.g. 90" style="width:64px"> <small style="color:var(--dim)">(also half/double)</small></span></label>
+    <div class="btns"><button class="primary" id="shopGo">Show matches</button><button id="shopReset">Reset</button><button id="shopAll">All to cart</button></div>
+    <div id="shopSrc"></div>
+    <div class="list" id="shortlist"></div>
+    <div class="btns" id="shopMoreBox" style="display:none"><button id="shopMore">Show 30 more</button></div>
+    <div class="hint"><span class="kbd">Up</span> <span class="kbd">Down</span> move and play · <span class="kbd">Enter</span> to cart · <span class="kbd">+</span> more like this · <span class="kbd">-</span> less like this · <span class="kbd">F</span> fly to it · <span class="kbd">Space</span> stop. The list also respects the filters on the left (pack, key, tempo, used or unused).</div>
+  </div>
+</div>
 
 <div id="methods" class="panel">
   <div style="display:flex;justify-content:space-between;align-items:center"><h1>HOW THE SOUND GALAXY WORKS</h1><button id="methodsClose">Close (Esc)</button></div>
@@ -179,10 +225,16 @@
 </div>
 
 <div id="cartbox" class="panel">
-  <h2 style="margin-top:0">Cart <span id="cartCount"></span></h2>
+  <div style="display:flex;align-items:center;gap:6px">
+    <h2 style="margin:0">Cart <span id="cartCount"></span></h2>
+    <select id="cartPick" style="width:130px;margin-left:auto" title="Keep a cart per project or mood"></select>
+    <button id="cartNew" title="Start another cart">New</button><button id="cartRename" title="Rename this cart">Rename</button>
+  </div>
+  <div class="note" id="cartVibe"></div>
+  <div id="cartSlots"></div>
   <div class="list" id="cart"></div>
-  <div class="btns"><button class="primary" id="saveCart">Save cart</button><button id="copyCart">Copy paths</button><button id="cartToKit">Cart to kit</button><button id="clearCart">Empty</button></div>
-  <div class="hint">The cart is remembered between visits. Save cart writes soundlab_cart.txt to Downloads; Soundlab_Cart_To_Project.lua lays it out in REAPER, and python soundlab.py cart makes a Cart folder for REAPER's Media Explorer.</div>
+  <div class="btns"><button class="primary" id="saveCart">Save cart</button><button id="playThrough">Play through</button><button id="copyCart">Copy paths</button><button id="cartToKit">Cart to kit</button><button id="clearCart">Empty</button></div>
+  <div class="hint">Star the keepers (they save first). Dashed slots are what the cart is missing: click one to list sounds that match the cart's feel, key and tempo. The cart is remembered between visits. Save cart writes soundlab_cart.txt to Downloads; Soundlab_Cart_To_Project.lua lays it out in REAPER, and python soundlab.py cart makes a Cart folder for REAPER's Media Explorer.</div>
 </div>
 
 <div id="tip"></div>
@@ -760,9 +812,20 @@ $("saveKit").onclick = () => {
 // ---------- cart: collect sounds you like while you explore ----------
 const pathIndex = new Map();
 function idxOfPath(p) { if (!pathIndex.size) for (let i = 0; i < N; i++) pathIndex.set(pathOf(i), i); return pathIndex.get(p); }
-let cart = [];
-try { cart = JSON.parse(localStorage.getItem("soundlab_cart") || "[]").map(idxOfPath).filter(i => i !== undefined); } catch (e) { cart = []; }
-function keepCart() { try { localStorage.setItem("soundlab_cart", JSON.stringify(cart.map(pathOf))); } catch (e) {} }
+// several named carts (one per song or mood), starred keepers, all remembered in the browser
+let carts = {}, cartName = "My cart", stars = new Set();
+try {
+  const raw = JSON.parse(localStorage.getItem("soundlab_carts") || "null");
+  if (raw) { carts = raw.carts || {}; cartName = raw.active || Object.keys(carts)[0] || cartName; stars = new Set(raw.stars || []); }
+  else carts = { [cartName]: JSON.parse(localStorage.getItem("soundlab_cart") || "[]") };
+} catch (e) { carts = {}; }
+if (!carts[cartName]) carts[cartName] = [];
+let cart = carts[cartName].map(idxOfPath).filter(i => i !== undefined);
+function keepCart() {
+  carts[cartName] = cart.map(pathOf);
+  try { localStorage.setItem("soundlab_carts", JSON.stringify({ carts, active: cartName, stars: [...stars] })); localStorage.setItem("soundlab_cart", JSON.stringify(carts[cartName])); } catch (e) {}
+}
+function switchCart(name) { keepCart(); cartName = name; if (!carts[name]) carts[name] = []; cart = carts[name].map(idxOfPath).filter(i => i !== undefined); keepCart(); drawCart(); }
 const flashes = [];
 function flash(i) {
   const m = new THREE.Mesh(new THREE.RingGeometry(2, 2.6, 32), new THREE.MeshBasicMaterial({ color:0x4ef0b0, side:THREE.DoubleSide, transparent:true }));
@@ -773,34 +836,273 @@ function addToCart(i) {
   play(i);
   if (cart.includes(i)) return;
   cart.push(i); keepCart(); drawCart(); flash(i);
+  const c = $("cartCount"); c.classList.remove("bump"); void c.offsetWidth; c.classList.add("bump");
 }
+const SLOTS = [["kick", "Kick"], ["snare_clap", "Snare or clap"], ["hat", "Hats"], ["perc", "Perc"], ["bass", "Bass"], ["melodic", "Melodic"], ["loop", "Loop"], ["texture", "Texture or FX"]];
+const slotOf = i => { const t = typeName(i); return t === "fx_noise" || t === "other" ? "texture" : t; };
+function cartVibe() {                            // the cart's overall feel, its key and tempo, and anything that clashes
+  const v = { n: cart.length }; if (!cart.length) return v;
+  const avg = k => cart.reduce((a, j) => a + G.feats[k][j], 0) / cart.length;
+  v.bright = avg("bright"); v.punch = avg("punch"); v.noise = avg("noise");
+  v.lofi = cart.filter(j => (G.chars[G.ch[j]] || "").includes("lofi")).length / cart.length;
+  const tonal = cart.filter(j => G.key[j] >= 0 && ["bass", "melodic", "loop"].includes(typeName(j)));
+  if (tonal.length) {
+    let best = -1, bestN = 0;
+    for (const k of new Set(tonal.map(j => G.key[j]))) { const n = tonal.filter(j => keyCompat(k, G.key[j])).length; if (n > bestN) { best = k; bestN = n; } }
+    v.key = best; v.keyAgree = bestN; v.tonal = tonal.length; v.keyOff = tonal.filter(j => !keyCompat(best, G.key[j]));
+  }
+  const loops = cart.filter(j => G.bpm[j] && typeName(j) === "loop").map(j => G.bpm[j]).sort((a, b) => a - b);
+  if (loops.length) { v.bpm = loops[Math.floor(loops.length / 2)]; v.bpmOff = cart.filter(j => G.bpm[j] && typeName(j) === "loop" && !tempoCompat(v.bpm, G.bpm[j])); }
+  return v;
+}
+function vibeWords(v) {
+  const w = [];
+  if (v.bright < 95) w.push("dark"); else if (v.bright > 160) w.push("bright");
+  if (v.punch > 160) w.push("punchy"); else if (v.punch < 95) w.push("soft");
+  if (v.noise > 160) w.push("gritty"); else if (v.noise < 95) w.push("clean");
+  if (v.lofi > .5) w.push("lofi");
+  return w.length ? w.join(", ") : "balanced";
+}
+const toStep = x => x < 45 ? -2 : x < 100 ? -1 : x > 210 ? 2 : x > 155 ? 1 : 0;
+function fillSlot(slot) {                        // list sounds for a missing slot that match the cart's feel, key and tempo
+  const v = cartVibe(), role = tIdx(slot); if (role < 0) return;
+  $("role").value = role;
+  $("sliders").querySelectorAll("input").forEach(r => { r.value = 0; if (v.n && (r.dataset.k === "bright" || r.dataset.k === "noise")) r.value = toStep(v[r.dataset.k]); r.oninput(); });
+  $("shopKey").value = v.key >= 0 && ["bass", "melodic", "loop"].includes(slot) ? v.key : ""; $("shopKeyFits").checked = true;
+  $("shopBpm").value = v.bpm && slot === "loop" ? v.bpm : "";
+  $("shop").classList.remove("min"); $("shopMin").textContent = "Hide";
+  runShop(); $("shopSrc").textContent = `For your cart's ${SLOTS.find(s => s[0] === slot)[1].toLowerCase()} slot · ` + $("shopSrc").textContent;
+}
+let ptTimer = null, ptAt = -1;
+function stopPlayThrough() { clearInterval(ptTimer); ptTimer = null; ptAt = -1; $("playThrough").textContent = "Play through"; $("cart").querySelectorAll(".playing").forEach(d => d.classList.remove("playing")); }
+function cartOrder() { return SLOTS.flatMap(([slot]) => cart.filter(j => slotOf(j) === slot).sort((a, b) => stars.has(pathOf(b)) - stars.has(pathOf(a)))); }
 function drawCart() {
-  $("cartbox").style.display = cart.length ? "block" : "none"; $("cartCount").textContent = `(${cart.length})`;
-  $("cart").innerHTML = "";
-  cart.forEach((j, n) => { const d = document.createElement("div");
-    d.innerHTML = `<span class="sw" style="background:${TYPE_COLOR[typeName(j)]||"#888"}"></span>${G.n[j]}<small>remove</small>`;
-    d.onclick = e => { if (e.target.tagName === "SMALL") { cart.splice(n, 1); keepCart(); drawCart(); } else { select(j); flyTo(j); } };
+  const names = Object.keys(carts);
+  $("cartbox").style.display = cart.length || names.length > 1 ? "block" : "none"; $("cartCount").textContent = `(${cart.length})`;
+  $("cartPick").innerHTML = ""; for (const nm of names) $("cartPick").add(new Option(`${nm} (${carts[nm].length})`, nm)); $("cartPick").value = cartName;
+  const v = cartVibe();
+  let vt = "";
+  if (v.n) {
+    vt = `Sounds <b>${vibeWords(v)}</b>` + (v.key >= 0 ? ` · key <b>${G.keys[v.key]}</b> (${v.keyAgree} of ${v.tonal} tonal sounds fit)` : "") + (v.bpm ? ` · loops around <b>${v.bpm} BPM</b>` : "");
+    if (v.keyOff && v.keyOff.length) vt += `<span class="warn">Key clash: ${v.keyOff.slice(0, 3).map(j => `${G.n[j]} (${G.keys[G.key[j]]})`).join(", ")}</span>`;
+    if (v.bpmOff && v.bpmOff.length) vt += `<span class="warn">Far off tempo: ${v.bpmOff.slice(0, 3).map(j => `${G.n[j]} (${G.bpm[j]})`).join(", ")}</span>`;
+  } else vt = "Empty. Shift+click a dot, or press Enter in the Find a sound list.";
+  $("cartVibe").innerHTML = vt;
+  $("cartSlots").innerHTML = "";
+  for (const [slot, label] of SLOTS) {
+    const n = cart.filter(j => slotOf(j) === slot).length, sp = document.createElement("span");
+    sp.className = n ? "full" : "empty"; sp.textContent = n ? `${label} ${n}` : `+ ${label}`;
+    if (!n) { sp.title = "List sounds that fit this cart"; sp.onclick = () => fillSlot(slot); }
+    $("cartSlots").appendChild(sp);
+  }
+  $("cart").innerHTML = ""; let last = "";
+  for (const j of cartOrder()) {
+    const slot = slotOf(j);
+    if (slot !== last) { const h = document.createElement("h3"); h.textContent = SLOTS.find(s => s[0] === slot)[1]; $("cart").appendChild(h); last = slot; }
+    const d = document.createElement("div"), p = pathOf(j); d.dataset.i = j;
+    d.innerHTML = `<span class="star${stars.has(p) ? " on" : ""}" title="Star a keeper">&#9733;</span><span class="sw" style="background:${TYPE_COLOR[typeName(j)]||"#888"}"></span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${G.n[j]}</span><small>remove</small>`;
+    d.onclick = e => {
+      if (e.target.tagName === "SMALL") { cart.splice(cart.indexOf(j), 1); keepCart(); drawCart(); }
+      else if (e.target.classList.contains("star")) { stars.has(p) ? stars.delete(p) : stars.add(p); keepCart(); drawCart(); }
+      else { select(j); flyTo(j); }
+    };
     d.onmouseenter = () => play(j);
-    $("cart").appendChild(d); });
+    $("cart").appendChild(d);
+  }
 }
+$("cartPick").onchange = () => { switchCart($("cartPick").value); $("cartPick").blur(); };
+$("cartNew").onclick = () => { const nm = (prompt("Name the new cart (a song, a mood, a gear upload):", "Cart " + (Object.keys(carts).length + 1)) || "").trim(); if (nm) switchCart(nm); };
+$("cartRename").onclick = () => {
+  const nm = (prompt("Rename this cart:", cartName) || "").trim(); if (!nm || nm === cartName || carts[nm]) return;
+  carts[nm] = carts[cartName]; delete carts[cartName]; cartName = nm; keepCart(); drawCart();
+};
+$("playThrough").onclick = () => {
+  if (ptTimer) return stopPlayThrough();
+  const seq = cartOrder(); if (!seq.length) return;
+  $("playThrough").textContent = "Stop"; ptAt = -1;
+  const step = () => {
+    ptAt++; if (ptAt >= seq.length) return stopPlayThrough();
+    const j = seq[ptAt]; play(j);
+    $("cart").querySelectorAll("div[data-i]").forEach(d => d.classList.toggle("playing", +d.dataset.i === j));
+  };
+  step(); ptTimer = setInterval(step, 1300);
+};
 function setCartMode(v) { $("cartMode").checked = v; document.body.classList.toggle("cartmode", v); }
 $("cartMode").onchange = e => setCartMode(e.target.checked);
 $("cartBtn").onclick = () => addToCart(sel);
-$("clearCart").onclick = () => { if (confirm("Empty the cart?")) { cart.length = 0; keepCart(); drawCart(); } };
+$("clearCart").onclick = () => {
+  if (!confirm(`Empty "${cartName}"?`)) return;
+  cart.length = 0;
+  if (Object.keys(carts).length > 1 && confirm(`Also delete the "${cartName}" cart itself?`)) { delete carts[cartName]; cartName = Object.keys(carts)[0]; cart = carts[cartName].map(idxOfPath).filter(i => i !== undefined); }
+  keepCart(); drawCart();
+};
 $("cartToKit").onclick = () => { for (const j of cart) if (!kit.includes(j)) kit.push(j); drawKit(); };
 $("copyCart").onclick = () => { const t = document.createElement("textarea"); t.value = cart.map(pathOf).join("\n"); document.body.appendChild(t); t.select(); document.execCommand("copy"); t.remove(); $("copyCart").textContent = "Copied"; setTimeout(() => $("copyCart").textContent = "Copy paths", 1200); };
 $("saveCart").onclick = () => {
-  const lines = cart.map(j => [typeName(j), G.bpm[j] || "", KEYN(G.key[j]), pathOf(j)].join("\t"));
+  const seq = [...cart].sort((a, b) => stars.has(pathOf(b)) - stars.has(pathOf(a)));          // starred keepers first
+  const lines = seq.map(j => [typeName(j), G.bpm[j] || "", KEYN(G.key[j]), pathOf(j)].join("\t"));
   const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob(["type\tbpm\tkey\tpath\n" + lines.join("\n")], { type:"text/plain" }));
   a.download = "soundlab_cart.txt"; a.click();
 };
 drawCart();
+
+// ---------- find a sound: a shortlist you can audition with the keyboard ----------
+const SLIDERS = [["bright", "dark", "bright"], ["length", "short", "long"], ["punch", "soft", "punchy"], ["body", "thin", "heavy low end"], ["noise", "tonal", "noisy"], ["snap", "slow attack", "snappy"]];
+const STEP_TARGET = { "-2": 20, "-1": 72, "1": 183, "2": 235 }, STEP_WORD = { "-2": "very ", "-1": "", "0": "", "1": "", "2": "very " };
+for (const [k, lo, hi] of SLIDERS) {
+  const d = document.createElement("div"); d.className = "sl";
+  d.innerHTML = `<span>${G.featLabels[k].replace(" (fast attack)", "")}</span><input type="range" min="-2" max="2" step="1" value="0" data-k="${k}"><span>any</span>`;
+  const r = d.querySelector("input"), out = d.querySelector("span:last-child");
+  r.oninput = () => { const v = +r.value; out.textContent = v === 0 ? "any" : STEP_WORD[v] + (v < 0 ? lo : hi); };
+  r.onchange = () => { r.blur(); runShop(); };
+  $("sliders").appendChild(d);
+}
+for (const ti of order) $("role").add(new Option(TYPE_LABEL[G.types[ti]] || G.types[ti], ti));
+for (let i = 0; i < 24; i++) $("shopKey").add(new Option(G.keys[i], i));
+let pool = [], base = new Map(), liked = [], disliked = new Set(), shown = [], cur = -1, shopShow = 30, shopSource = "";
+const firstCopy = i => G.dup[i] < 0 || dupFirst.get(G.dup[i]) === i;
+function minVibe(i, list) { let m = Infinity; for (const j of list) { const d = vibeDist(i, j); if (d < m) m = d; } return m; }
+function rankPool() {                              // order the pool, then spread packs so one pack does not fill the list
+  const sc = pool.filter(i => !disliked.has(i)).map(i => {
+    let s = base.get(i) || 0;
+    if (liked.length) s = minVibe(i, liked) + 0.25 * s;
+    if (disliked.size) s -= 0.5 * Math.min(minVibe(i, disliked), 20000);
+    return [s, i];
+  }).sort((a, b) => a[0] - b[0]).slice(0, 600);
+  const used = new Map(), out = [];
+  for (const [s0, i] of sc) { const p = G.p[i], n = used.get(p) || 0; out.push([s0 + n * 1500, i]); used.set(p, n + 1); }
+  out.sort((a, b) => a[0] - b[0]);
+  for (const j of liked) if (!out.some(x => x[1] === j)) out.unshift([-1, j]);
+  shown = out.map(x => x[1]);
+}
+// pack makers' own words in file and folder names back up (or overrule) the audio guess
+const NAME_HINT = { kick:/kick|(^|[^a-z])bd([^a-z]|$)|kik/i, snare_clap:/snare|(^|[^a-z])sd([^a-z]|$)|clap|rim|snap/i, hat:/hat|(^|[^a-z])hh|cymbal|ride|crash|shaker|(^|[^a-z])oh([^a-z]|$)|(^|[^a-z])ch([^a-z]|$)/i,
+  perc:/perc|conga|bongo|cowbell|(^|[^a-z])toms?([^a-z]|$)|tamb|knock|block|clave/i, bass:/bass|808|(^|[^a-z])sub([^a-z]|$)/i,
+  melodic:/keys?([^a-z]|$)|piano|synth|chord|lead|pad|rhodes|guitar|organ|bell|pluck/i, loop:/loop|break|bpm/i, fx_noise:/fx|riser|sweep|impact|noise|vinyl/i, texture:/texture|ambien|atmos|drone/i };
+const nameOf = i => (G.n[i] + " " + G.dirs[G.d[i]].replace(/\\/g, "/").split("/").slice(-2).join(" "));
+function nameFit(i, role) {                        // 0 neutral, -1 the name says this role, +1 the name says another role
+  const t = G.types[role], txt = nameOf(i), mine = NAME_HINT[t] && NAME_HINT[t].test(txt);
+  if (mine) return -1;
+  for (const [k, rx] of Object.entries(NAME_HINT)) if (k !== t && k !== "loop" && rx.test(txt)) return 1;
+  return 0;
+}
+function eligible(i) { return vis[i] >= 0.9 && firstCopy(i); }
+function runShop() {
+  const role = $("role").value === "" ? -1 : +$("role").value, key = $("shopKey").value === "" ? -1 : +$("shopKey").value;
+  const fits = $("shopKeyFits").checked, bpm = parseFloat($("shopBpm").value) || 0;
+  const want = [...$("sliders").querySelectorAll("input")].map(r => [r.dataset.k, +r.value]).filter(x => x[1] !== 0);
+  highlight = new Set(); applyFilter();          // judge by the left-panel filters, not the last list's highlight
+  pool = []; base = new Map(); liked = []; disliked = new Set();
+  for (let i = 0; i < N; i++) {
+    if (!eligible(i)) continue;
+    let d = 0;
+    if (role >= 0) {
+      const nf = nameFit(i, role);
+      if (G.t[i] !== role) { if (nf < 0 && G.types[role] !== "loop") d += 2500; else continue; }   // named as this role, measured as another
+      else if (nf > 0) d += 20000;                                                                // measured as this role, named as another
+    }
+    for (const [k, v] of want) {
+      const x = G.feats[k][i], t = STEP_TARGET[v];
+      if ((v === 2 && x >= t) || (v === -2 && x <= t)) continue;     // "very" means at least this far out
+      d += (x - t) * (x - t);
+    }
+    if (key >= 0) { if (G.key[i] < 0) d += 8000; else if (fits ? !keyCompat(key, G.key[i]) : G.key[i] !== key) continue; }
+    if (bpm) { if (G.bpm[i]) { if (!tempoCompat(bpm, G.bpm[i])) continue; } else d += 3000; }
+    pool.push(i); base.set(i, d);
+  }
+  const words = [role >= 0 ? (TYPE_LABEL[G.types[role]] || G.types[role]).toLowerCase() : "sounds",
+    ...want.map(([k, v]) => { const s = SLIDERS.find(x => x[0] === k); return STEP_WORD[v] + (v < 0 ? s[1] : s[2]); }),
+    key >= 0 ? `in ${G.keys[key]}${fits ? " or a key that fits" : ""}` : "", bpm ? `at ${bpm} BPM` : ""].filter(Boolean);
+  shopSource = `${pool.length.toLocaleString()} ${words[0]} match: ${words.slice(1).join(", ") || "no limits yet, pick a kind or move a slider"}`;
+  shopShow = 30; cur = -1; rankPool(); drawShortlist(); if (shown.length) moveCur(0);
+}
+function listFrom(indices, label, scores) {        // lasso or "sounds like this" feed the same list
+  pool = indices.filter(eligible); base = new Map(pool.map((i, k) => [i, scores ? scores[indices.indexOf(i)] : k]));
+  liked = []; disliked = new Set(); shopSource = label; shopShow = 30; cur = -1; rankPool(); drawShortlist(); if (shown.length) moveCur(0);
+  $("shop").classList.remove("min"); $("shopMin").textContent = "Hide";
+}
+function drawShortlist() {
+  const box = $("shortlist"); box.innerHTML = "";
+  const refine = liked.length || disliked.size ? ` · refined by ${liked.length} more-like and ${disliked.size} less-like` : "";
+  $("shopSrc").textContent = shopSource + refine;
+  shown.slice(0, shopShow).forEach((j, n) => {
+    const d = document.createElement("div"); if (liked.includes(j)) d.classList.add("liked"); if (n === cur) d.classList.add("cur");
+    const cv = document.createElement("canvas"); if (!drawWave(cv, j, 62, 18)) cv.style.visibility = "hidden";
+    const meta = [TYPE_LABEL[typeName(j)] || typeName(j), G.key[j] >= 0 ? G.keys[G.key[j]] : "", G.bpm[j] ? G.bpm[j] + " BPM" : ""].filter(Boolean).join(" · ");
+    d.appendChild(cv);
+    const t = document.createElement("span"); t.className = "nm"; t.title = pathOf(j); t.innerHTML = `${G.n[j]}<br><small>${meta}</small>`; d.appendChild(t);
+    const pk = document.createElement("small"); pk.textContent = short(G.packs[G.p[j]]).slice(0, 18); d.appendChild(pk);
+    d.onclick = () => moveCur(n); d.ondblclick = () => addToCart(j);
+    box.appendChild(d);
+  });
+  $("shopMoreBox").style.display = shown.length > shopShow ? "flex" : "none";
+  highlight = new Set(shown.slice(0, shopShow)); applyFilter();
+}
+function moveCur(n) {
+  if (!shown.length) return;
+  cur = Math.max(0, Math.min(Math.min(shown.length, shopShow) - 1, n));
+  const rows = $("shortlist").children; [...rows].forEach((r, k) => r.classList.toggle("cur", k === cur));
+  rows[cur] && rows[cur].scrollIntoView({ block: "nearest" });
+  const j = shown[cur]; play(j); ring.position.set(pos[j*3], pos[j*3+1], pos[j*3+2]); ring.visible = true;
+}
+function refine(more) {
+  if (cur < 0) return; const j = shown[cur];
+  if (more) { if (!liked.includes(j)) liked.push(j); disliked.delete(j); } else { disliked.add(j); liked = liked.filter(x => x !== j); }
+  if (pool.length < 2000 && more) {                  // small pools (a box, a seed) widen to neighbors of what you like
+    const add = []; for (let i = 0; i < N; i++) if (eligible(i) && G.t[i] === G.t[j] && !base.has(i) && vibeDist(i, j) < 6000) add.push(i);
+    for (const i of add.slice(0, 3000)) { pool.push(i); base.set(i, 1e6); }
+  }
+  rankPool(); shopShow = Math.max(shopShow, 30); drawShortlist(); moveCur(more ? Math.max(0, shown.indexOf(j)) : cur);
+}
+$("shopGo").onclick = runShop; $("role").onchange = () => { $("role").blur(); runShop(); };
+$("shopKey").onchange = () => { $("shopKey").blur(); runShop(); }; $("shopKeyFits").onchange = runShop;
+$("shopBpm").onchange = runShop;
+$("shopReset").onclick = () => { $("role").value = ""; $("shopKey").value = ""; $("shopBpm").value = ""; $("sliders").querySelectorAll("input").forEach(r => { r.value = 0; r.oninput(); });
+  pool = []; shown = []; liked = []; disliked = new Set(); cur = -1; shopSource = ""; drawShortlist(); highlight = new Set(); applyFilter(); };
+$("shopMore").onclick = () => { shopShow += 30; drawShortlist(); moveCur(cur); };
+$("shopAll").onclick = () => { for (const j of shown.slice(0, shopShow)) if (!cart.includes(j)) { cart.push(j); } keepCart(); drawCart(); };
+$("shopMin").onclick = () => { const m = $("shop").classList.toggle("min"); $("shopMin").textContent = m ? "Show" : "Hide"; };
+// "Sounds like this" in the side panel can fill the shortlist too
+{ const b = document.createElement("button"); b.textContent = "List more like this"; b.onclick = () => {
+    if (sel < 0) return; const scores = [], idx = [];
+    for (let i = 0; i < N; i++) if (G.t[i] === G.t[sel] && i !== sel) { idx.push(i); scores.push(vibeDist(i, sel)); }
+    const top = idx.map((i, k) => [scores[k], i]).sort((a, b) => a[0] - b[0]).slice(0, 3000);
+    listFrom(top.map(x => x[1]), `Sounds like ${G.n[sel]}`, top.map(x => x[0]));
+  }; $("fillBtn").after(b); }
+
+// box select: drag a rectangle on the map, the sounds inside land in the shortlist
+let boxMode = false, boxStart = null;
+function setBoxMode(v) { boxMode = v; controls.enabled = !v; document.body.classList.toggle("boxmode", v); $("boxBtn").classList.toggle("on", v); }
+$("boxBtn").onclick = () => setBoxMode(!boxMode);
+renderer.domElement.addEventListener("pointerdown", e => { if (!boxMode) return; boxStart = [e.clientX, e.clientY]; });
+addEventListener("pointermove", e => {
+  if (!boxMode || !boxStart) return; const r = $("boxRect");
+  const x = Math.min(e.clientX, boxStart[0]), y = Math.min(e.clientY, boxStart[1]);
+  Object.assign(r.style, { display: "block", left: x + "px", top: y + "px", width: Math.abs(e.clientX - boxStart[0]) + "px", height: Math.abs(e.clientY - boxStart[1]) + "px" });
+});
+addEventListener("pointerup", e => {
+  if (!boxMode || !boxStart) return;
+  const [x0, y0] = boxStart, x1 = e.clientX, y1 = e.clientY; boxStart = null; $("boxRect").style.display = "none"; setBoxMode(false);
+  const lx = Math.min(x0, x1), hx = Math.max(x0, x1), ly = Math.min(y0, y1), hy = Math.max(y0, y1); if (hx - lx < 6 || hy - ly < 6) return;
+  const w = innerWidth, h = innerHeight, m = new THREE.Matrix4().multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse), el = m.elements;
+  const cx = (lx + hx) / 2, cy = (ly + hy) / 2, idx = [], sc = [];
+  for (let i = 0; i < N; i++) {
+    if (vis[i] < 0.9) continue;
+    const X = pos[i*3], Y = pos[i*3+1], Z = pos[i*3+2], cw = el[3]*X + el[7]*Y + el[11]*Z + el[15]; if (cw <= 0) continue;
+    const sx = ((el[0]*X + el[4]*Y + el[8]*Z + el[12])/cw*.5+.5)*w, sy = (1-((el[1]*X + el[5]*Y + el[9]*Z + el[13])/cw*.5+.5))*h;
+    if (sx >= lx && sx <= hx && sy >= ly && sy <= hy) { idx.push(i); sc.push((sx-cx)**2 + (sy-cy)**2); }
+  }
+  const counts = {}; for (const i of idx) { const t = TYPE_LABEL[typeName(i)] || typeName(i); counts[t] = (counts[t] || 0) + 1; }
+  const mix = Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([t, n]) => `${n.toLocaleString()} ${t.toLowerCase()}`).join(", ");
+  listFrom(idx, `${idx.length.toLocaleString()} sounds in your box (${mix}), closest to its center first`, sc);
+});
 
 // ---------- mouse ----------
 let down = null, lastHover = -1, hoverT = 0;
 const tipWave = document.createElement("canvas");
 renderer.domElement.addEventListener("pointerdown", e => down = [e.clientX, e.clientY]);
 renderer.domElement.addEventListener("pointerup", e => {
+  if (boxMode || boxStart) return;
   if (!down || Math.hypot(e.clientX-down[0], e.clientY-down[1]) > 4) return;
   const i = pick(e.clientX, e.clientY);
   if ($("cartMode").checked || e.shiftKey) { addToCart(i); return; }
@@ -812,7 +1114,7 @@ renderer.domElement.addEventListener("dblclick", e => {
   if (i >= 0 && G.t[i] !== focusType) focusGalaxy(G.t[i]);
 });
 renderer.domElement.addEventListener("pointermove", e => {
-  const now = performance.now(); if (now - hoverT < 70 || e.buttons) return; hoverT = now;
+  const now = performance.now(); if (boxMode || now - hoverT < 70 || e.buttons) return; hoverT = now;
   const i = pick(e.clientX, e.clientY, 7), tip = $("tip");
   if (i < 0) { tip.style.display = "none"; lastHover = -1; return; }
   tip.style.display = "block"; tip.style.left = Math.min(e.clientX + 14, innerWidth - 300) + "px"; tip.style.top = e.clientY + 12 + "px";
@@ -824,12 +1126,22 @@ renderer.domElement.addEventListener("pointermove", e => {
   lastHover = i;
 });
 addEventListener("keydown", e => {
-  if (document.activeElement.tagName === "INPUT") return;
+  const tag = document.activeElement.tagName;
+  if ((tag === "INPUT" && document.activeElement.type !== "checkbox") || tag === "SELECT") return;
+  if (e.key === "ArrowDown" || e.key === "ArrowUp") { if (shown.length) { e.preventDefault(); moveCur(cur + (e.key === "ArrowDown" ? 1 : -1)); } return; }
+  if (e.key === "Enter" && cur >= 0) { e.preventDefault(); addToCart(shown[cur]); return; }
+  if ((e.key === "+" || e.key === "=") && cur >= 0) { refine(true); return; }
+  if ((e.key === "-" || e.key === "_") && cur >= 0) { refine(false); return; }
+  if ((e.key === "f" || e.key === "F") && cur >= 0) { select(shown[cur], false); flyTo(shown[cur]); return; }
+  if (e.key === "b" || e.key === "B") { setBoxMode(!boxMode); return; }
+  if (e.key === "l" || e.key === "L") { $("shopMin").onclick(); return; }
   if (e.key === "Escape" && $("methods").style.display === "block") { openMethods(false); return; }
+  if (e.key === "Escape" && boxMode) { setBoxMode(false); return; }
   if (e.key === "Escape") { if (sel < 0 && focusType >= 0) focusGalaxy(-1); else select(-1); }
   if (e.key === "c" || e.key === "C") setCartMode(!$("cartMode").checked);
   if (e.key === " ") {                            // space: stop if something is playing, else replay the selected sound
     e.preventDefault();
+    if (ptTimer) { stopPlayThrough(); audio.pause(); return; }
     if (!audio.paused && !audio.ended) { audio.pause(); audio.currentTime = 0; }
     else if (sel >= 0) play(sel);
   }
