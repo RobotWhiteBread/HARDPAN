@@ -44,6 +44,56 @@ def quantize(vals):
     return [0 if v is None else max(1, min(255, int(1 + 254 * (v - lo) / span))) for v in vals]
 
 
+def rank_quantize(vals):
+    """1..255 by rank, so sounds bunched at one end of a scale still spread out; ties stay together."""
+    present = np.array([v for v in vals if v is not None], dtype=float)
+    if not len(present):
+        return [0] * len(vals)
+    srt = np.sort(present)
+    lo = np.searchsorted(srt, present, "left")
+    hi = np.searchsorted(srt, present, "right")
+    q = 1 + np.round(254 * ((lo + hi - 1) / 2) / max(len(srt) - 1, 1)).astype(int)
+    out, k = [], 0
+    for v in vals:
+        if v is None:
+            out.append(0)
+        else:
+            out.append(int(q[k]))
+            k += 1
+    return out
+
+
+def project_use(cfg, rows):
+    """Which library sounds each REAPER project uses: {sound index: [project numbers]}."""
+    idx = {r["Path"].lower(): i for i, r in enumerate(rows)}
+    skip = {"backups", "_upgrades"}
+    names, use, seen = [], defaultdict(list), 0
+    for root in cfg.get("project_folders") or [cfg["projects"]]:
+        root = os.path.normpath(os.path.expanduser(root))
+        for dp, dn, fn in os.walk(root):
+            dn[:] = [d for d in dn if d.lower() not in skip and not d.startswith(".")]
+            for n in sorted(fn):
+                if not n.lower().endswith(".rpp"):
+                    continue
+                p = os.path.join(dp, n)
+                if SC.excluded(p, cfg) or any(re.search(rx, n, re.I) for rx in cfg.get("exclude_projects", [])):
+                    continue
+                seen += 1
+                hits = set()
+                for line in open(p, encoding="utf-8", errors="replace"):
+                    t = line.strip()
+                    if t.startswith('FILE "'):
+                        j = idx.get(t[6:t.rindex('"')].lower())
+                        if j is not None:
+                            hits.add(j)
+                if hits:
+                    k = len(names)
+                    names.append(os.path.relpath(p, root)[:-4].replace("\\", "/"))
+                    for j in hits:
+                        use[j].append(k)
+    return seen, names, {str(j): v for j, v in use.items()}
+
+
 def note_midi(s):
     if not s:
         return -1
@@ -190,7 +240,7 @@ def main():
         out["bars"].append(int(f(r["bars"])))
         out["midi"].append(note_midi(r["note"]))
 
-    feats = {}
+    feats, shown = {}, {}
     for key, label, fn in FEATS:
         vals = []
         for r in rows:
@@ -198,7 +248,8 @@ def main():
                 vals.append(fn(r))
             except Exception:
                 vals.append(None)
-        feats[key] = quantize(vals)
+        feats[key] = quantize(vals)          # islands
+        shown[key] = rank_quantize(vals)     # what the page shows: rank, so nothing piles up at an edge
 
     inv = lambda d: [k for k, _ in sorted(d.items(), key=lambda kv: kv[1])]
     type_names, pack_names, char_names = inv(types), inv(packs), inv(chars)
@@ -220,10 +271,14 @@ def main():
             ng += 1
     print(f"  {ng} duplicate groups covering {sum(1 for d in dup if d >= 0)} files")
 
+    n_proj, proj_names, use = project_use(cfg, rows)
+    print(f"  {len(use)} sounds used across {len(proj_names)} of {n_proj} REAPER projects")
+
     data = {
         "count": len(rows), "types": type_names, "packs": pack_names, "dirs": inv(dirs),
         "notes": inv(notes), "chars": char_names, "keys": KEYS,
-        "featLabels": {k: l for k, l, _ in FEATS}, "feats": feats, **out,
+        "featLabels": {k: l for k, l, _ in FEATS}, "feats": shown, **out,
+        "projects": proj_names, "projectsScanned": n_proj, "use": use,
         "cl": lab.tolist(), "clusters": clusters, "dup": dup,
         "sx": np.round(pos[:, 0] * 10).astype(int).tolist(),
         "sy": np.round(pos[:, 1] * 10).astype(int).tolist(),

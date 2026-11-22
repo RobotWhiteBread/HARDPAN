@@ -65,7 +65,7 @@
     <label class="row">Near / far <select id="az"></select></label>
   </div>
   <label class="row">Color by
-    <select id="colorBy"><option value="type">Sound type</option><option value="key">Key</option><option value="pack">Pack</option><option value="tempo">Tempo</option><option value="island">Island</option></select>
+    <select id="colorBy"><option value="type">Sound type</option><option value="key">Key</option><option value="pack">Pack</option><option value="tempo">Tempo</option><option value="island">Island</option><option value="used">Used in your projects</option></select>
   </label>
   <label class="row">Dot size <input type="range" id="size" min="1" max="12" value="4" style="width:150px"></label>
   <label class="row">Island names <input type="checkbox" id="islandNames" checked></label>
@@ -84,11 +84,18 @@
   <div class="types" id="types"></div>
   <div class="btns"><button id="allTypes">All</button><button id="noTypes">None</button></div>
 
+  <h2>Used vs owned</h2>
+  <div class="note" id="useStats"></div>
+  <div id="useTypes"></div>
+  <label class="row">Show <select id="useFilter"><option value="">everything</option><option value="used">only sounds I've used</option><option value="unused">only sounds I've never used</option></select></label>
+  <div class="btns"><button id="useColor">Light up what I use</button><button id="roulette">Surprise me: an unused island</button></div>
+  <div class="note" id="rouletteNote"></div>
+
   <h2>Gaps in your collection</h2>
   <label class="row">Look at <select id="gapType"><option value="">pick a type</option></select></label>
   <div id="gaps"></div>
 
-  <div class="hint">Drag to orbit, scroll to zoom, right-drag to pan. Hover to hear. Click a dot for its closest matches. Shift+click (or Cart mode) drops it in your cart. In Sound types, double-click a galaxy to focus it. Esc clears, Space plays or stops.</div>
+  <div class="hint">Drag to orbit, scroll to zoom, right-drag to pan. Hover to hear. Click a dot for its closest matches. Shift+click (or Cart mode) drops it in your cart. In Sound types, double-click a galaxy to focus it. Used vs owned shows what your projects actually use. Esc clears, Space plays or stops.</div>
 </div>
 
 <div id="right" class="panel">
@@ -98,6 +105,7 @@
   <div class="tags" id="selTags"></div>
   <div class="note" id="selIsland"></div>
   <div class="note" id="selDups"></div>
+  <div class="note" id="selUsed"></div>
   <div class="bars" id="selBars"></div>
   <div class="btns">
     <button class="primary" id="playBtn">Play</button>
@@ -214,6 +222,9 @@ const dupFirst = new Map(), dupCount = new Map();
 for (let i = 0; i < N; i++) { const d = G.dup[i]; if (d < 0) continue; if (!dupFirst.has(d)) dupFirst.set(d, i); dupCount.set(d, (dupCount.get(d) || 0) + 1); }
 const extra = [...dupCount.values()].reduce((a, b) => a + b - 1, 0);
 $("total").textContent = `${N.toLocaleString()} sounds, ${G.packs.length} packs, ${G.clusters.filter(c => c.n).length} islands, ${extra.toLocaleString()} extra copies`;
+
+const PROJ = G.projects || [], USE = G.use || {};
+const useCount = new Uint16Array(N); for (const k in USE) useCount[+k] = USE[k].length;
 
 const typeOn = G.types.map(() => true);
 const typeCounts = G.types.map(() => 0); for (let i = 0; i < N; i++) typeCounts[G.t[i]]++;
@@ -332,6 +343,7 @@ function colorize() {
     else if (mode === "key") { const k = G.key[i]; c = k < 0 ? hsl(0,0,.25) : hsl(fifths.indexOf(k%12)/12, k>=12?.55:.85, k>=12?.5:.6); }
     else if (mode === "pack") c = hsl((G.p[i]*0.61803398875)%1, .7, .58);
     else if (mode === "island") c = hsl((G.cl[i]*0.61803398875)%1, .75, .58);
+    else if (mode === "used") c = useCount[i] ? hsl(.11, .95, Math.min(.5 + useCount[i]*.05, .78)) : hsl(.6, .12, .17);
     else { const b = G.bpm[i]; c = b ? hsl(.66 - Math.min(Math.max((b-60)/120,0),1)*.66, .85, .55) : hsl(0,0,.22); }
     col[i*3] = c.r; col[i*3+1] = c.g; col[i*3+2] = c.b;
   }
@@ -362,12 +374,13 @@ function applyFilter() {
   const pf = $("packFilter").value === "" ? -1 : +$("packFilter").value;
   const lo = parseFloat($("bpmLo").value) || 0, hi = parseFloat($("bpmHi").value) || 999, tempoOn = $("bpmLo").value || $("bpmHi").value;
   const one = $("oneEach").checked, packLow = q.length ? G.packs.map(p => p.toLowerCase()) : null;
-  const sk = sel >= 0 ? G.key[sel] : -1, sb = sel >= 0 ? G.bpm[sel] : 0;
+  const sk = sel >= 0 ? G.key[sel] : -1, sb = sel >= 0 ? G.bpm[sel] : 0, uf = $("useFilter").value;
   let shown = 0;
   for (let i = 0; i < N; i++) {
     let v = typeOn[G.t[i]] ? 1 : 0;
     if (v && one && G.dup[i] >= 0 && dupFirst.get(G.dup[i]) !== i) v = 0;
     if (v && pf >= 0 && G.p[i] !== pf) v = 0;
+    if (v && uf && (uf === "used") !== (useCount[i] > 0)) v = 0;
     if (v && kf >= 0 && G.key[i] !== kf) v = 0;
     if (v && tempoOn && !(G.bpm[i] >= lo && G.bpm[i] <= hi)) v = 0;
     if (v && q.length) {
@@ -385,7 +398,31 @@ function applyFilter() {
   $("status").textContent = `${shown.toLocaleString()} sounds showing` + (matchOn && sel >= 0 ? " that match the key and tempo" : "");
 }
 let ft; for (const id of ["search","bpmLo","bpmHi"]) $(id).oninput = () => { clearTimeout(ft); ft = setTimeout(applyFilter, 250); };
-for (const id of ["keyFilter","packFilter","oneEach"]) $(id).onchange = applyFilter;
+for (const id of ["keyFilter","packFilter","oneEach","useFilter"]) $(id).onchange = applyFilter;
+
+// ---------- used vs owned: what your projects actually reach for ----------
+function drawUse() {
+  if (!G.projectsScanned) { $("useStats").textContent = "No REAPER projects found yet. Set projects (or project_folders) in soundlab.json and run the galaxy step again."; return; }
+  let used = 0; const ut = G.types.map(() => 0);
+  for (let i = 0; i < N; i++) if (useCount[i]) { used++; ut[G.t[i]]++; }
+  const pct = x => (100 * x).toFixed(x < .01 ? 2 : 1) + "%";
+  $("useStats").innerHTML = `You have used <b>${used.toLocaleString()}</b> of ${N.toLocaleString()} sounds (<b>${pct(used / N)}</b>) across ${PROJ.length} of ${G.projectsScanned} projects. Everything else is still unexplored.`;
+  $("useTypes").innerHTML = `<div class="bars">` + order.map(ti => { const t = G.types[ti], w = ut[ti] ? Math.max(2, 100 * ut[ti] / typeCounts[ti]) : 0;
+    return `<div><span style="width:96px">${TYPE_LABEL[t] || t}</span><i><b style="width:${w}%;background:${TYPE_COLOR[t] || "#888"}"></b></i><span style="width:78px;text-align:right">${ut[ti]} of ${typeCounts[ti].toLocaleString()}</span></div>`; }).join("") + `</div>`;
+}
+$("useColor").onclick = () => { $("colorBy").value = "used"; colorize(); };
+$("roulette").onclick = () => {
+  const touched = new Uint8Array(G.clusters.length);
+  for (let i = 0; i < N; i++) if (useCount[i]) touched[G.cl[i]] = 1;
+  const fresh = G.clusters.map((c, k) => k).filter(k => !touched[k] && G.clusters[k].n >= 40);
+  if (!fresh.length) { $("rouletteNote").textContent = "You have used something from every island. Impressive."; return; }
+  const k = fresh[Math.floor(Math.random() * fresh.length)], c = G.clusters[k];
+  const members = []; for (let i = 0; i < N; i++) if (G.cl[i] === k) members.push(i);
+  if ($("layoutMode").value !== "sim") { $("layoutMode").value = "sim"; $("layoutMode").onchange(); }
+  select(members[Math.floor(Math.random() * members.length)]);
+  fly = { from: controls.target.clone(), to: new THREE.Vector3(c.x, c.y, c.z), t: 0 }; controls.autoRotate = false;
+  $("rouletteNote").innerHTML = `<b>${c.label}</b>: ${c.n.toLocaleString()} sounds you have never used, mostly from ${c.packs.map(p => p[0]).slice(0, 2).join(" and ")}. ${fresh.length} islands are untouched. Try building a whole idea from this one.`;
+};
 
 // ---------- gaps ----------
 const LEVEL = ["very low", "low", "medium-low", "medium-high", "high", "very high"];
@@ -505,6 +542,8 @@ function select(i, autoplay = true) {
     const where = [...new Set(copies.map(j => short(G.packs[G.p[j]]) + " / " + G.dirs[G.d[j]].split("\\").slice(-1)[0]))].slice(0, 3);
     $("selDups").innerHTML = `Same sound also at ${copies.length} other spot${copies.length > 1 ? "s" : ""}: ${where.join("; ")}`;
   } else $("selDups").innerHTML = "";
+  const u = USE[i];
+  $("selUsed").textContent = u ? `Used in ${u.length} project${u.length > 1 ? "s" : ""}: ${u.slice(0, 4).map(k => PROJ[k]).join(", ")}${u.length > 4 ? ` and ${u.length - 4} more` : ""}` : (G.projectsScanned ? "Never used in a project yet" : "");
   $("selBars").innerHTML = vibeKeys.map(f => `<div><span style="width:110px">${G.featLabels[f]}</span><i><b style="width:${G.feats[f][i]/2.55}%"></b></i></div>`).join("");
   $("matchBtn").disabled = G.key[i] < 0 && !G.bpm[i];
   nb = neighbors(i);
@@ -673,7 +712,7 @@ addEventListener("keydown", e => {
 // ---------- run ----------
 function resize() { renderer.setSize(innerWidth, innerHeight); camera.aspect = innerWidth/innerHeight; camera.updateProjectionMatrix(); mat.uniforms.scale.value = innerHeight/2; }
 addEventListener("resize", resize); resize();
-layout(false); colorize(); applyFilter();
+layout(false); colorize(); applyFilter(); drawUse();
 if (!TH) $("status").textContent += "  ·  waveforms not made yet (run Open-Galaxy.ps1 -Waveforms)";
 (function loop() {
   requestAnimationFrame(loop);

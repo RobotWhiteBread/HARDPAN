@@ -11,6 +11,9 @@ start). Point SOUNDLAB_CONFIG at another file to use that instead.
   reaper          path to the REAPER program (only for the launcher scripts)
   downloads       where the Sound Galaxy saves kits and carts (your browser's download folder)
   exclude         optional list of regexes; any sample path matching one is left out everywhere
+  project_folders optional list of folders holding your REAPER projects (default: projects).
+                  The Sound Galaxy reads them to show which sounds you actually use
+  exclude_projects optional list of regexes; project file names matching one are skipped
   reaper_paths    optional extra folders handed to REAPER scripts, e.g. {"stoner_doom": "..."}
 """
 import json, os, re
