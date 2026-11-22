@@ -25,6 +25,8 @@
   .types label { display:flex; align-items:center; gap:6px; margin:2px 0; cursor:pointer; }
   .sw { width:10px; height:10px; border-radius:50%; display:inline-block; flex:none; }
   .count { margin-left:auto; color:var(--dim); font-size:11px; }
+  .go { font-size:10px; color:var(--accent); border:1px solid var(--line); border-radius:8px; padding:0 6px; margin-left:4px; cursor:pointer; }
+  .go:hover { border-color:var(--accent); }
   button { background:#1a2230; color:var(--text); border:1px solid var(--line); border-radius:6px; padding:5px 9px; cursor:pointer; }
   button:hover { border-color:var(--accent); }
   button.on { border-color:var(--accent); color:var(--accent); }
@@ -55,7 +57,7 @@
   <div class="hint" id="total" style="margin-top:0"></div>
 
   <h2>Map</h2>
-  <label class="row">Layout <select id="layoutMode"><option value="sim">Similarity islands</option><option value="axes">Choose the axes</option></select></label>
+  <label class="row">Layout <select id="layoutMode"><option value="sim">Similarity islands</option><option value="types">Sound types (one galaxy each)</option><option value="axes">Choose the axes</option></select></label>
   <div id="axesBox" style="display:none">
     <label class="row">Left / right <select id="ax"></select></label>
     <label class="row">Up / down <select id="ay"></select></label>
@@ -217,20 +219,66 @@ const typeCounts = G.types.map(() => 0); for (let i = 0; i < N; i++) typeCounts[
 const order = G.types.map((t, i) => i).sort((a, b) => typeCounts[b] - typeCounts[a]);
 for (const ti of order) {
   const t = G.types[ti], l = document.createElement("label");
-  l.innerHTML = `<input type="checkbox" checked><span class="sw" style="background:${TYPE_COLOR[t]||"#888"}"></span>${TYPE_LABEL[t]||t}<span class="count">${typeCounts[ti].toLocaleString()}</span>`;
+  l.innerHTML = `<input type="checkbox" checked><span class="sw" style="background:${TYPE_COLOR[t]||"#888"}"></span>${TYPE_LABEL[t]||t}<span class="count">${typeCounts[ti].toLocaleString()}</span><span class="go" data-act="go" title="Fly to this type's galaxy">go</span><span class="go" data-act="only" title="Show only this type">only</span>`;
   l.querySelector("input").onchange = e => { typeOn[ti] = e.target.checked; applyFilter(); };
+  l.querySelectorAll(".go").forEach(b => b.onclick = e => {
+    e.preventDefault(); e.stopPropagation();
+    if (b.dataset.act === "only") { typeOn.fill(false); typeOn[ti] = true; $("types").querySelectorAll("input").forEach((c, k) => c.checked = order[k] === ti); applyFilter(); }
+    if ($("layoutMode").value !== "types") { $("layoutMode").value = "types"; $("layoutMode").onchange(); }
+    flyToType(ti);
+  });
   $("types").appendChild(l);
   $("gapType").add(new Option(TYPE_LABEL[t] || t, ti));
 }
 $("allTypes").onclick = () => setAllTypes(true); $("noTypes").onclick = () => setAllTypes(false);
 function setAllTypes(v) { typeOn.fill(v); $("types").querySelectorAll("input").forEach(c => c.checked = v); applyFilter(); }
 
+// ---------- sound-type galaxies: one mini galaxy per type, in a 3 x 3 wall ----------
+const CELL = 112, MINI = 84, COLS = 3;
+const cellOf = new Map();                                   // type index -> [x, y]
+order.forEach((ti, k) => { const r = Math.floor(k / COLS), c = k % COLS;
+  const rows = Math.ceil(order.length / COLS);
+  cellOf.set(ti, [(c - (COLS - 1) / 2) * CELL, ((rows - 1) / 2 - r) * CELL]); });
+const typeBox = G.types.map(() => null);                     // each type's own spread, so every mini galaxy fills its cell
+{
+  const by = G.types.map(() => [[], [], []]);
+  for (let i = 0; i < N; i++) { const b = by[G.t[i]]; if (b[0].length < 6000 || Math.random() < 0.05) { b[0].push(G.sx[i]); b[1].push(G.sy[i]); b[2].push(G.sz[i]); } }
+  by.forEach((b, ti) => { if (!b[0].length) return;
+    typeBox[ti] = b.map(a => { a.sort((x, y) => x - y); return [a[Math.floor(a.length * .02)], a[Math.floor(a.length * .98)] || a[a.length - 1]]; }); });
+}
+const typeFrames = new THREE.Group(); scene.add(typeFrames);
+function drawTypeFrames(on) {
+  typeFrames.clear();
+  if (!on) return;
+  for (const ti of order) {
+    const [cx, cy] = cellOf.get(ti), col = new THREE.Color(TYPE_COLOR[G.types[ti]] || "#888");
+    const f = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(MINI + 8, MINI + 8, MINI + 8)), new THREE.LineBasicMaterial({ color: col, transparent: true, opacity: .18 }));
+    f.position.set(cx, cy, 0); typeFrames.add(f);
+    const s = makeLabel(`${TYPE_LABEL[G.types[ti]] || G.types[ti]}  ${typeCounts[ti].toLocaleString()}`, "#" + col.getHexString(), 30);
+    s.position.set(cx, cy + MINI / 2 + 12, 0); typeFrames.add(s);
+  }
+}
+function flyToType(ti) {
+  const [cx, cy] = cellOf.get(ti);
+  fly = { from: controls.target.clone(), to: new THREE.Vector3(cx, cy, 0), t: 0,
+          camFrom: camera.position.clone(), camTo: new THREE.Vector3(cx + 40, cy + 25, 150) };
+  controls.autoRotate = false;
+}
+
 // ---------- layout ----------
 let tween = 1;
 function layout(animate = true) {
   start.set(pos);
-  if ($("layoutMode").value === "sim") {
+  const mode = $("layoutMode").value;
+  box.visible = mode !== "types"; drawTypeFrames(mode === "types");
+  if (mode === "sim") {
     for (let i = 0; i < N; i++) { target[i*3] = G.sx[i]/10; target[i*3+1] = G.sy[i]/10; target[i*3+2] = G.sz[i]/10; }
+  } else if (mode === "types") {
+    for (let i = 0; i < N; i++) {
+      const ti = G.t[i], b = typeBox[ti], [cx, cy] = cellOf.get(ti);
+      const n = (v, k) => Math.max(-.5, Math.min(.5, (v - b[k][0]) / ((b[k][1] - b[k][0]) || 1) - .5));
+      target[i*3] = cx + n(G.sx[i], 0) * MINI; target[i*3+1] = cy + n(G.sy[i], 1) * MINI; target[i*3+2] = n(G.sz[i], 2) * MINI;
+    }
   } else {
     const fx = G.feats[$("ax").value], fy = G.feats[$("ay").value], fz = G.feats[$("az").value];
     for (let i = 0; i < N; i++) {
@@ -618,7 +666,7 @@ if (!TH) $("status").textContent += "  ·  waveforms not made yet (run Open-Gala
     if (sel >= 0) { ring.position.set(pos[sel*3], pos[sel*3+1], pos[sel*3+2]); drawWeb(); }
     if (tween >= 1) afterMove();
   }
-  if (fly) { fly.t = Math.min(1, fly.t + 0.04); controls.target.lerpVectors(fly.from, fly.to, fly.t); if (fly.t >= 1) fly = null; }
+  if (fly) { fly.t = Math.min(1, fly.t + 0.04); const e_ = fly.t < .5 ? 2*fly.t*fly.t : 1 - (-2*fly.t+2)**2/2; controls.target.lerpVectors(fly.from, fly.to, e_); if (fly.camFrom) camera.position.lerpVectors(fly.camFrom, fly.camTo, e_); if (fly.t >= 1) fly = null; }
   ring.lookAt(camera.position);
   for (let k = flashes.length - 1; k >= 0; k--) {
     const f = flashes[k], age = (performance.now() - f.t0) / 700;
