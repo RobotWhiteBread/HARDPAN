@@ -73,7 +73,24 @@ Distance on this map means difference. The directions do not have fixed meanings
 
 ### Sound-type galaxies
 
-The same island layout, split by sound type. Each type is rescaled to fill its own box (2nd to 98th percentile on each direction).
+Each sound type gets its own box, in one of two modes:
+
+- **Measured axes** (default): three measures chosen for that kind of sound, each ranked within the type only (ties share their average rank), so the center of a box is a typical sound of that type.
+
+  | Type | Left to right | Bottom to top | Far to near |
+  |---|---|---|---|
+  | Kick, snare or clap | brightness | punch | length |
+  | Hat | brightness | length | noisiness |
+  | Perc | brightness | length | punch |
+  | Bass | brightness | length | punch |
+  | Melodic | brightness | length | noisiness |
+  | Loop | tempo | brightness | punch |
+  | Texture | noisiness | length | stereo width |
+  | FX and noise | noisiness | length | brightness |
+
+- **Similarity islands**: the island layout, split by type and rescaled to fill each box (2nd to 98th percentile on each direction). Directions have no fixed meaning.
+
+Focusing a type lists the islands that hold at least 8 of its sounds (copies counted once). Each island is named by how it differs from the rest of its type on the three axes (for example "bright, punchy, short kicks", using a word when its average rank is in the outer third), and shows its size, its two biggest packs, and its most typical sound: the member closest to the island's average on the three axes. Clicking an island sends all its sounds to Find a sound, most typical first.
 
 ### Neighbors ("Sounds like this")
 

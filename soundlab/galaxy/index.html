@@ -76,6 +76,9 @@
   body.boxmode #c { cursor:crosshair; }
   #legend { position:fixed; bottom:12px; left:50%; transform:translateX(-50%); max-width:min(760px, calc(100% - 640px)); min-width:320px; font-size:12px; padding:8px 12px; }
   #legend b { color:var(--accent); font-weight:600; }
+  #islandList div { display:block; }
+  #islandList .il { font-weight:600; }
+  #islandList small { display:block; margin-left:0; white-space:normal; }
   #legend .lk { color:var(--dim); }
   #methods { top:50%; left:50%; transform:translate(-50%,-50%); width:min(760px, 92vw); max-height:86vh; overflow:auto; display:none; z-index:20; font-size:13px; }
   #methods h3 { font-size:13px; margin:14px 0 4px; color:var(--accent); }
@@ -95,7 +98,15 @@
 
   <h2>Map</h2>
   <label class="row">Layout <select id="layoutMode"><option value="sim">Similarity islands</option><option value="types">Sound types (one galaxy each)</option><option value="axes">Choose the axes</option></select></label>
+  <div id="typesBox" style="display:none">
+    <label class="row">Inside each galaxy <select id="innerMode"><option value="axes">Measured axes</option><option value="sim">Similarity islands</option></select></label>
+  </div>
   <button id="allGalaxies" style="display:none;width:100%;margin:4px 0">Back to all types</button>
+  <div id="islandBox" style="display:none">
+    <h2 id="islandTitle">Islands</h2>
+    <div class="hint" style="margin-top:0">Hover to hear its most typical sound and light it up on the map. Click to list all its sounds in Find a sound.</div>
+    <div class="list" id="islandList" style="max-height:300px;overflow:auto"></div>
+  </div>
   <div id="axesBox" style="display:none">
     <label class="row">Left / right <select id="ax"></select></label>
     <label class="row">Up / down <select id="ay"></select></label>
@@ -200,6 +211,8 @@
   </table>
   <h3>How positions are scaled</h3>
   <p>On "Choose the axes", each axis is a rank, not a raw value: the middle of an axis is the median sound in your library, and the ends are your darkest and brightest (or least and most punchy) sounds. Ranking keeps sounds from piling up against an edge. Some measures produce big ties: about 1 in 5 sounds (mostly hats) has no measurable energy under 250 Hz, and half of all sounds reach their peak in the first window. Inside a tie, sounds are ordered by a related measure (low end ties by brightness, brightest at the edge; snap ties by punch, punchiest at the edge), so the tie shows as a band whose thickness is its size. Mono files all share one stereo width and still sit on one plane. The shadows on the walls are the cloud seen straight on from each side: brighter means more sounds stacked behind that spot. The bars in the side panel use the same ranks, so 80% means "more than 80% of your library".</p>
+  <h3>Sound types view</h3>
+  <p>Each sound type gets its own box. With "Measured axes" (the default), each box uses three measures that matter for that kind of sound, ranked within that type only, so the middle of the kick box is a typical kick, not a typical sound. Kicks, snares, perc and bass: brightness, punch or length. Hats: brightness, length (closed to open) and noisiness. Melodic: brightness, length, noisiness. Loops: tempo, brightness, punch. Textures and FX: noisiness, length, width or brightness. The axis names are written on every box. Focus a box (double-click) to list its islands: each shows its size, a short profile on the three axes, its main packs, and its most typical sound (the member closest to the island's average), which plays when you hover.</p>
   <h3>Similarity islands</h3>
   <p>Each sound becomes a point in 7 dimensions (the measures above except tempo, scaled 0 to 1 between the 1st and 99th percentile), plus a weight for its sound type so islands stay mostly one kind of sound. K-means groups them into 360 islands. t-SNE then places the 360 island centers in 3D so similar islands sit near each other, and each sound is spread around its island center along the three main ways sounds in that island differ. Distance means difference; the directions themselves have no fixed meaning. Island names are the main sound type plus any tag shared by at least 30% of its members.</p>
   <h3>Sound types and tags</h3>
@@ -380,7 +393,12 @@ function drawLegend() {
   const mode = $("layoutMode").value, ks = [$("ax").value, $("ay").value, $("az").value];
   let t;
   if (mode === "axes") t = `<span class="lk">Left to right</span> <b>${G.featLabels[ks[0]]}</b> (${ENDS[ks[0]].join(" to ")}) &nbsp; <span class="lk">Bottom to top</span> <b>${G.featLabels[ks[1]]}</b> (${ENDS[ks[1]].join(" to ")}) &nbsp; <span class="lk">Far to near</span> <b>${G.featLabels[ks[2]]}</b> (${ENDS[ks[2]].join(" to ")}). Positions are ranks: the middle of each axis is your median sound.` + [...new Set(ks)].map(tieNote).join("") + ($("shadows").checked ? ` Shadows on the walls show where sounds pile up, seen straight on.` : "");
-  else if (mode === "types") t = `<b>One galaxy per sound type.</b> Inside each box, sounds that measure alike sit together; the directions have no fixed meaning.`;
+  else if (mode === "types" && innerAxes()) {
+    const ti = focusType >= 0 ? focusType : -1;
+    t = ti >= 0 ? `<b>${TYPE_LABEL[G.types[ti]]}</b>: <span class="lk">left to right</span> <b>${G.featLabels[axesFor(ti)[0]]}</b> (${ENDS[axesFor(ti)[0]].join(" to ")}), <span class="lk">bottom to top</span> <b>${G.featLabels[axesFor(ti)[1]]}</b> (${ENDS[axesFor(ti)[1]].join(" to ")}), <span class="lk">far to near</span> <b>${G.featLabels[axesFor(ti)[2]]}</b> (${ENDS[axesFor(ti)[2]].join(" to ")}). Ranked within ${TYPE_LABEL[G.types[ti]].toLowerCase()} only, so the middle is a typical one.`
+      : `<b>One galaxy per sound type, each on its own measured axes</b> (named on each box), ranked within that type: the middle of a box is a typical sound of that kind. Double-click a galaxy to focus it and list its islands.`;
+  }
+  else if (mode === "types") t = `<b>One galaxy per sound type.</b> Inside each box, sounds that measure alike sit together; the directions have no fixed meaning. Double-click a galaxy to focus it and list its islands.`;
   else t = `<b>Similarity islands.</b> Sounds that measure alike across brightness, punch, low end, length, noisiness, width and snap sit together. Distance means difference; the directions have no fixed meaning.`;
   $("legend").innerHTML = `${t} ${COLOR_TEXT[$("colorBy").value] || ""} <a href="#" id="legendHow" style="color:var(--accent)">How this works</a>`;
   $("legendHow").onclick = e => { e.preventDefault(); openMethods(true); };
@@ -440,6 +458,25 @@ const typeBox = G.types.map(() => null);                     // each type's own 
   by.forEach((b, ti) => { if (!b[0].length) return;
     typeBox[ti] = b.map(a => { a.sort((x, y) => x - y); return [a[Math.floor(a.length * .02)], a[Math.floor(a.length * .98)] || a[a.length - 1]]; }); });
 }
+// inside each type's galaxy, three measures that matter for that kind of sound, ranked within the type
+const TYPE_AXES = { kick:["bright","punch","length"], snare_clap:["bright","punch","length"], hat:["bright","length","noise"],
+  perc:["bright","length","punch"], bass:["bright","length","punch"], melodic:["bright","length","noise"],
+  loop:["tempo","bright","punch"], texture:["noise","length","width"], fx_noise:["noise","length","bright"], other:["bright","punch","length"] };
+const axesFor = ti => TYPE_AXES[G.types[ti]] || TYPE_AXES.other;
+const typeRank = {};                                         // "ti|feat" -> Uint8Array of within-type ranks (0..255)
+function rankIn(ti, k) {
+  const key = ti + "|" + k; if (typeRank[key]) return typeRank[key];
+  const mem = []; for (let i = 0; i < N; i++) if (G.t[i] === ti) mem.push(i);
+  const f = G.feats[k], r = new Uint8Array(N);
+  mem.sort((a, b) => f[a] - f[b]);
+  let s0 = 0;
+  for (let n = 1; n <= mem.length; n++) {                    // ties share their average rank
+    if (n === mem.length || f[mem[n]] !== f[mem[s0]]) { const v = Math.round(255 * ((s0 + n - 1) / 2) / Math.max(1, mem.length - 1)); for (let m = s0; m < n; m++) r[mem[m]] = v; s0 = n; }
+  }
+  if (k === "tempo") for (const i of mem) if (!G.bpm[i]) r[i] = 0;
+  return (typeRank[key] = r);
+}
+const innerAxes = () => $("layoutMode").value === "types" && $("innerMode").value === "axes";
 const typeFrames = new THREE.Group(); scene.add(typeFrames);
 function drawTypeFrames(on) {
   typeFrames.clear();
@@ -450,6 +487,14 @@ function drawTypeFrames(on) {
     f.position.set(cx, cy, cz); typeFrames.add(f);
     const s = makeLabel(`${TYPE_LABEL[G.types[ti]] || G.types[ti]}  ${typeCounts[ti].toLocaleString()}`, "#" + col.getHexString(), focusType >= 0 && ti !== focusType ? 22 : 30);
     s.position.set(cx, cy + sz / 2 + (sz > 100 ? 18 : 10), cz); typeFrames.add(s);
+    if (innerAxes() && (focusType < 0 || ti === focusType)) {        // name the three measured axes on the box edges
+      const big = ti === focusType, h = sz / 2, px = big ? 26 : 15, ax = axesFor(ti), lab = (k, d) => `${ENDS[k][0]} → ${ENDS[k][1]}`;
+      const put = (txt, c, x, y, z, p2 = px) => { const l = makeLabel(txt, c, p2); l.position.set(x, y, z); if (!big) l.scale.multiplyScalar(.75); typeFrames.add(l); };
+      put(`${G.featLabels[ax[0]]}: ${lab(ax[0])}`, AXIS_COLOR[0], cx, cy - h - (big ? 14 : 6), cz + h);
+      put(`${G.featLabels[ax[1]]}: ${lab(ax[1])}`, AXIS_COLOR[1], cx - h - (big ? 40 : 22), cy, cz + h);
+      if (big) put(`${G.featLabels[ax[2]]}: ${lab(ax[2])} (far to near)`, AXIS_COLOR[2], cx - h - 20, cy - h - 14, cz);
+      else put(`depth: ${G.featLabels[ax[2]].toLowerCase()}`, AXIS_COLOR[2], cx + h - 10, cy - h - 6, cz + h);
+    }
   }
 }
 function flyToType(ti) { focusGalaxy(ti); }
@@ -457,7 +502,7 @@ function focusGalaxy(ti) {                                  // expand one type's
   focusType = ti;
   $("allGalaxies").style.display = ti >= 0 ? "block" : "none";
   $("allGalaxies").textContent = ti >= 0 ? `Back to all types (now: ${TYPE_LABEL[G.types[ti]] || G.types[ti]})` : "Back to all types";
-  layout();
+  layout(); drawLegend(); drawIslandList();
   fly = { from: controls.target.clone(), to: new THREE.Vector3(0, 0, 0), t: 0,
           camFrom: camera.position.clone(), camTo: ti >= 0 ? new THREE.Vector3(110, 70, 300) : new THREE.Vector3(150, 90, 380) };
   controls.autoRotate = false;
@@ -472,7 +517,13 @@ function layout(animate = true) {
   if (mode === "sim") {
     for (let i = 0; i < N; i++) { target[i*3] = G.sx[i]/10; target[i*3+1] = G.sy[i]/10; target[i*3+2] = G.sz[i]/10; }
   } else if (mode === "types") {
-    for (let i = 0; i < N; i++) {
+    if ($("innerMode").value === "axes") {
+      const R = G.types.map((_, ti) => axesFor(ti).map(k => rankIn(ti, k)));
+      for (let i = 0; i < N; i++) {
+        const ti = G.t[i], [cx, cy, cz, sz] = cellFor(ti), r = R[ti];
+        target[i*3] = cx + (r[0][i] / 255 - .5) * sz + jit[i*3] * sz / 220; target[i*3+1] = cy + (r[1][i] / 255 - .5) * sz + jit[i*3+1] * sz / 220; target[i*3+2] = cz + (r[2][i] / 255 - .5) * sz + jit[i*3+2] * sz / 220;
+      }
+    } else for (let i = 0; i < N; i++) {
       const ti = G.t[i], b = typeBox[ti], [cx, cy, cz, sz] = cellFor(ti);
       const n = (v, k) => Math.max(-.5, Math.min(.5, (v - b[k][0]) / ((b[k][1] - b[k][0]) || 1) - .5));
       target[i*3] = cx + n(G.sx[i], 0) * sz; target[i*3+1] = cy + n(G.sy[i], 1) * sz; target[i*3+2] = cz + n(G.sz[i], 2) * sz;
@@ -486,12 +537,19 @@ function layout(animate = true) {
   if (!animate) { pos.set(target); geo.attributes.position.needsUpdate = true; afterMove(); } else tween = 0;
 }
 $("allGalaxies").onclick = () => focusGalaxy(-1);
-$("layoutMode").onchange = () => { if ($("layoutMode").value !== "types" && focusType >= 0) { focusType = -1; $("allGalaxies").style.display = "none"; } $("axesBox").style.display = $("layoutMode").value === "axes" ? "block" : "none"; layout(); };
+$("innerMode").onchange = () => { $("innerMode").blur(); layout(); };
+$("layoutMode").onchange = () => { if ($("layoutMode").value !== "types" && focusType >= 0) { focusType = -1; $("allGalaxies").style.display = "none"; } $("axesBox").style.display = $("layoutMode").value === "axes" ? "block" : "none"; $("typesBox").style.display = $("layoutMode").value === "types" ? "block" : "none"; layout(); drawIslandList(); };
 ["ax","ay","az"].forEach(id => $(id).onchange = () => layout());
 
 function afterMove() {
   // island labels follow their sounds; only the bigger islands get a name so the sky stays readable
   islandLabels.clear();
+  if ($("islandNames").checked && $("layoutMode").value === "types" && focusType >= 0) {   // island names inside the focused galaxy
+    for (const isl of islandsCached(focusType).filter(x => x.m.length >= 40).slice(0, innerAxes() ? 12 : 30)) {
+      const j = isl.best, s = makeLabel(isl.name, "#c9d3e0", 20);        // label sits on the island's most typical sound
+      s.position.set(pos[j*3], pos[j*3+1] + 3, pos[j*3+2]); islandLabels.add(s);
+    }
+  }
   if ($("islandNames").checked && $("layoutMode").value === "sim") {
     const big = G.clusters.map((c, i) => [c, i]).filter(([c]) => c.n >= 250).sort((a, b) => b[0].n - a[0].n).slice(0, 70);
     for (const [c] of big) { const s = makeLabel(c.label, "#c9d3e0", 22); s.position.set(c.x, c.y + 4, c.z); islandLabels.add(s); }
@@ -507,6 +565,54 @@ function afterMove() {
   drawGaps(); drawShadows();
 }
 $("islandNames").onchange = afterMove; $("packNames").onchange = afterMove;
+
+// ---------- islands of the focused type: one click to reach what is inside ----------
+function islandsOf(ti) {
+  const by = new Map();
+  for (let i = 0; i < N; i++) if (G.t[i] === ti && firstCopyI(i)) { const c = G.cl[i]; if (!by.has(c)) by.set(c, []); by.get(c).push(i); }
+  const ax = axesFor(ti), R = ax.map(k => rankIn(ti, k));
+  const word = (k, v) => v < 80 ? ENDS[k][0] : v > 175 ? ENDS[k][1] : "";
+  const out = [...by.entries()].filter(([, m]) => m.length >= 8).map(([c, m]) => {
+    const mean = R.map(r => m.reduce((a, i) => a + r[i], 0) / m.length);
+    let best = m[0], bd = Infinity;                                    // most typical member: closest to the island's average
+    for (const i of m) { const d = R.reduce((a, r, k) => a + (r[i] - mean[k]) ** 2, 0); if (d < bd) { bd = d; best = i; } }
+    const packs = {}; for (const i of m) { const p = short(G.packs[G.p[i]]); packs[p] = (packs[p] || 0) + 1; }
+    const top = Object.entries(packs).sort((a, b) => b[1] - a[1]).slice(0, 2).map(x => x[0]);
+    const prof = ax.map((k, n) => word(k, mean[n])).filter(Boolean);
+    return { c, m, best, mean, top, prof };
+  }).sort((a, b) => b.m.length - a.m.length);
+  // name islands by how they differ from the rest of this type (the library-wide names all read "dark lofi kicks")
+  const plural = (TYPE_LABEL[G.types[ti]] || G.types[ti]).toLowerCase(), seen = {};
+  for (const isl of out) {
+    let nm = (isl.prof.length ? isl.prof.join(", ") : "middle of the road") + " " + plural;
+    seen[nm] = (seen[nm] || 0) + 1; if (seen[nm] > 1) nm += ` (${seen[nm]})`;
+    isl.name = nm;
+  }
+  return out;
+}
+let islandCache = { ti: -2, list: [] };
+const islandsCached = ti => islandCache.ti === ti ? islandCache.list : (islandCache = { ti, list: islandsOf(ti) }).list;
+const firstCopyI = i => G.dup[i] < 0 || dupFirst.get(G.dup[i]) === i;
+let islandHover = null;
+function drawIslandList() {
+  const on = $("layoutMode").value === "types" && focusType >= 0;
+  $("islandBox").style.display = on ? "block" : "none"; if (!on) return;
+  const ti = focusType, list = islandsCached(ti), ax = axesFor(ti);
+  $("islandTitle").textContent = `Islands in ${TYPE_LABEL[G.types[ti]] || G.types[ti]} (${list.length})`;
+  $("islandList").innerHTML = "";
+  for (const isl of list) {
+    const d = document.createElement("div"), cl = G.clusters[isl.c];
+    const bars = ax.map((k, n) => `<span title="${G.featLabels[k]}" style="display:inline-block;width:42px;height:4px;background:#1a2230;border-radius:2px;margin-right:4px;vertical-align:middle;position:relative"><b style="position:absolute;left:0;top:0;bottom:0;width:${Math.round(isl.mean[n] / 2.55)}%;background:${AXIS_COLOR[n]};border-radius:2px"></b></span>`).join("");
+    d.innerHTML = `<span class="il">${isl.name}</span> <small>${isl.m.length.toLocaleString()} sounds · map name "${cl.label}" · mostly ${isl.top.join(" and ")}</small><small>${bars}<span style="color:var(--dim)">${ax.map(k => G.featLabels[k].split(" ")[0].toLowerCase()).join(" · ")}</span></small>`;
+    d.onmouseenter = () => { play(isl.best); islandHover = new Set(isl.m); highlight = islandHover; applyFilter(); };
+    d.onmouseleave = () => { if (highlight === islandHover) { highlight = new Set(); applyFilter(); } };
+    d.onclick = () => {
+      const R = ax.map(k => rankIn(ti, k)), sc = isl.m.map(i => R.reduce((a, r, k) => a + (r[i] - isl.mean[k]) ** 2, 0));
+      listFrom(isl.m, `Island "${isl.name}": ${isl.m.length.toLocaleString()} sounds, most typical first`, sc);
+    };
+    $("islandList").appendChild(d);
+  }
+}
 
 function hsl(h, s, l) { return new THREE.Color().setHSL(h, s, l); }
 function colorize() {

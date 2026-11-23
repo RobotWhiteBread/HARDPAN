@@ -1,9 +1,15 @@
 # soundlab
 
-Your whole sample library on one 3D map. soundlab listens to every sample you
-own, measures how it sounds, and lays them all out so similar sounds sit
-together. Hover to hear, click to find the closest matches, drop favorites in a
-cart, and build kits and songs in REAPER from what you find.
+A new way to see and use the sample library you already own.
+
+Most producers reach for a tiny slice of what they own. On the author's machine,
+177 REAPER projects use 901 of 181,927 sounds: half of one percent. soundlab
+measures every sample you own, lays them all out on one 3D map so similar sounds
+sit together, shows you which ones you actually use, and helps you find the
+right sound fast when you need it. Hover to hear, click for the closest matches,
+ask for "a dark, short snare in F minor" and audition the shortlist with the
+arrow keys, gather a cart that tells you what it is missing, and build kits and
+songs in REAPER from what you find.
 
 ![The Sound Galaxy](demos/post1_galaxy.png)
 
@@ -22,6 +28,21 @@ It runs on your own machine, on your own files. Nothing is uploaded.
 | **Kit Builder** (REAPER) | Turns a saved kit into a 32 bar song: intro, verses, hook, outro, in one of four grooves (boom bap, house, electro, half-time), loops stretched to one tempo, a starting mix. |
 | **Project audit and upgrade** (REAPER) | Reads your REAPER projects, flags loops stretched far from their tempo, and adds two library alternatives to every sample as extra takes (select an item, press T to flip). Your originals are never overwritten. |
 | **Mix Check** | A report for any song: loudness (BS.1770), true peak, punch, loudness range, low end in mono, stereo width, tonal balance against your reference tracks, and kick and bass clash, with a spinnable 3D spectrogram. |
+
+## What is new here, and what is not
+
+Good tools already tag and search sample libraries (ADSR Sample Manager, Loopcloud),
+map drum hits by similarity (XLN XO, Algonaut Atlas) and find similar sounds
+(Sononym). soundlab borrows those ideas and adds a few that are hard to find elsewhere:
+
+- **Used vs owned.** It reads your own REAPER projects and shows which sounds you
+  have actually used, so the rest of the map becomes an invitation instead of clutter.
+- **A cart that knows what it is missing.** Gather sounds per song or mood; the cart
+  reports its overall feel, key and tempo, flags clashes, and fills an empty slot
+  ("+ Hats") with sounds that match the rest of the cart.
+- **Your whole library, every type, on one map,** across every pack and vendor you own.
+- **Open methods.** Every measure and threshold is written out in [METHODS.md](METHODS.md).
+  It is plain signal math on your own machine: no account, no upload, no subscription.
 
 ## Quick start (about 5 minutes plus measuring time)
 
