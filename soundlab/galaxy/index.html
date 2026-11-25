@@ -131,6 +131,8 @@
   <label class="row">Island names <input type="checkbox" id="islandNames" checked></label>
   <label class="row">Pack names <input type="checkbox" id="packNames"></label>
   <label class="row">One of each (hide copies) <input type="checkbox" id="oneEach"></label>
+  <label class="row">Collapse versions (sound families) <input type="checkbox" id="famOn"></label>
+  <label class="row">Show vendor bridges <input type="checkbox" id="bridgesOn"></label>
   <label class="row">Play on hover <input type="checkbox" id="hoverPlay" checked></label>
   <label class="row">Cart mode: click adds (C) <input type="checkbox" id="cartMode"></label>
   <label class="row">Zoom lens: details as you zoom in <input type="checkbox" id="lensOn" checked></label>
@@ -167,6 +169,8 @@
   <div class="note" id="selIsland"></div>
   <div class="note" id="selDups"></div>
   <div class="note" id="selUsed"></div>
+  <div class="note" id="selBridge"></div>
+  <div id="famBox" style="display:none"><h2 id="famTitle">Family</h2><div class="list" id="famList"></div></div>
   <div class="bars" id="selBars"></div>
   <div class="btns">
     <button class="primary" id="playBtn">Play</button>
@@ -431,7 +435,12 @@ G.packs.map((p, i) => [short(p), i]).sort((a, b) => a[0].localeCompare(b[0])).fo
 const dupFirst = new Map(), dupCount = new Map();
 for (let i = 0; i < N; i++) { const d = G.dup[i]; if (d < 0) continue; if (!dupFirst.has(d)) dupFirst.set(d, i); dupCount.set(d, (dupCount.get(d) || 0) + 1); }
 const extra = [...dupCount.values()].reduce((a, b) => a + b - 1, 0);
-$("total").textContent = `${N.toLocaleString()} sounds, ${G.packs.length} packs, ${G.clusters.filter(c => c.n).length} islands, ${extra.toLocaleString()} extra copies`;
+// sound families: near-identical versions of one sound (tape, saturated, 15 ips, pitched) under one leader
+const FAM = G.fam || null, famSize = new Map();
+if (FAM) for (let i = 0; i < N; i++) famSize.set(FAM[i], (famSize.get(FAM[i]) || 0) + 1);
+const famMembers = l => { const m = []; for (let i = 0; i < N; i++) if (FAM[i] === l) m.push(i); return m; };
+$("total").textContent = `${N.toLocaleString()} sounds, ${G.packs.length} packs, ${G.clusters.filter(c => c.n).length} islands, ${extra.toLocaleString()} extra copies` + (FAM ? `, about ${famSize.size.toLocaleString()} distinct sounds once versions are grouped` : "");
+if (!FAM) { $("famOn").disabled = true; $("bridgesOn").disabled = true; }
 
 const PROJ = G.projects || [], USE = G.use || {};
 const useCount = new Uint16Array(N); for (const k in USE) useCount[+k] = USE[k].length;
@@ -579,7 +588,7 @@ function afterMove() {
       const s = makeLabel(short(G.packs[p]), "#" + c.getHexString(), 20); s.position.set(a[0]/a[3], a[1]/a[3], a[2]/a[3]); packLabels.add(s); });
   }
   if (sel >= 0) { ring.position.set(pos[sel*3], pos[sel*3+1], pos[sel*3+2]); drawWeb(); }
-  drawGaps(); drawShadows(); islandCenters = null; lensKey = "";
+  drawGaps(); drawShadows(); islandCenters = null; lensKey = ""; drawBridges();
 }
 $("islandNames").onchange = afterMove; $("packNames").onchange = afterMove;
 
@@ -672,12 +681,13 @@ function applyFilter() {
   const kf = $("keyFilter").value === "" ? -1 : +$("keyFilter").value;
   const pf = $("packFilter").value === "" ? -1 : +$("packFilter").value;
   const lo = parseFloat($("bpmLo").value) || 0, hi = parseFloat($("bpmHi").value) || 999, tempoOn = $("bpmLo").value || $("bpmHi").value;
-  const one = $("oneEach").checked, packLow = q.length ? G.packs.map(p => p.toLowerCase()) : null;
+  const one = $("oneEach").checked, famCollapse = FAM && $("famOn").checked, packLow = q.length ? G.packs.map(p => p.toLowerCase()) : null;
   const sk = sel >= 0 ? G.key[sel] : -1, sb = sel >= 0 ? G.bpm[sel] : 0, uf = $("useFilter").value;
   let shown = 0;
   for (let i = 0; i < N; i++) {
     let v = typeOn[G.t[i]] ? 1 : 0;
     if (v && one && G.dup[i] >= 0 && dupFirst.get(G.dup[i]) !== i) v = 0;
+    if (v && famCollapse && FAM[i] !== i) v = 0;
     if (v && pf >= 0 && G.p[i] !== pf) v = 0;
     if (v && uf && (uf === "used") !== (useCount[i] > 0)) v = 0;
     if (v && kf >= 0 && G.key[i] !== kf) v = 0;
@@ -699,7 +709,29 @@ function applyFilter() {
   $("status").textContent = `${shown.toLocaleString()} sounds showing` + (matchOn && sel >= 0 ? " that match the key and tempo" : "");
 }
 let ft; for (const id of ["search","bpmLo","bpmHi"]) $(id).oninput = () => { clearTimeout(ft); ft = setTimeout(applyFilter, 250); };
-for (const id of ["keyFilter","packFilter","oneEach","useFilter"]) $(id).onchange = applyFilter;
+for (const id of ["keyFilter","packFilter","oneEach","useFilter","famOn"]) $(id).onchange = applyFilter;
+
+// ---------- vendor bridges: lines between sounds and their closest match from a different vendor ----------
+const bridgeGeo = new THREE.BufferGeometry(), BMAX = 5000;
+bridgeGeo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(BMAX * 6), 3));
+const bridgeLines = new THREE.LineSegments(bridgeGeo, new THREE.LineBasicMaterial({ color:0x5eead4, transparent:true, opacity:.45 }));
+bridgeLines.visible = false; scene.add(bridgeLines);
+const CLOSE = d => d <= 5 ? "nearly identical" : d <= 15 ? "very close" : d <= 40 ? "close" : "";
+function drawBridges() {
+  bridgeLines.visible = !!(FAM && $("bridgesOn").checked); if (!bridgeLines.visible) return;
+  const a = bridgeGeo.attributes.position.array; let n = 0;
+  const cand = [];
+  for (let i = 0; i < N; i++) {
+    const j = G.br[i]; if (j < 0 || G.brd[i] > 15 || vis[i] < .9 || vis[j] < .9) continue;
+    if (G.br[j] === i && j < i) continue;           // a mutual pair is drawn once
+    cand.push(i);
+  }
+  cand.sort((x, y) => G.brd[x] - G.brd[y]);
+  for (const i of cand) { if (n >= BMAX) break; const j = G.br[i]; a.set([pos[i*3], pos[i*3+1], pos[i*3+2], pos[j*3], pos[j*3+1], pos[j*3+2]], n * 6); n++; }
+  bridgeGeo.attributes.position.needsUpdate = true; bridgeGeo.setDrawRange(0, n * 2);
+  $("status").textContent = `${n.toLocaleString()} vendor bridges drawn: sounds whose closest match comes from a different vendor (closest pairs first)`;
+}
+$("bridgesOn").onchange = drawBridges;
 
 // ---------- used vs owned: what your projects actually reach for ----------
 function drawUse() {
@@ -809,6 +841,7 @@ function neighbors(i, k = 14) {
   for (let j = 0; j < N; j++) {
     if (j === i || (same && G.t[j] !== G.t[i])) continue;
     if (G.dup[i] >= 0 && G.dup[j] === G.dup[i]) continue;               // a copy is not a neighbor
+    if (FAM && FAM[j] === FAM[i]) continue;                             // nor another version of the same sound
     if (one && G.dup[j] >= 0 && dupFirst.get(G.dup[j]) !== j) continue;
     let d = vibeDist(i, j);
     if (G.bpm[i] && G.bpm[j]) { const x = (G.bpm[i] - G.bpm[j]) * 2; d += x*x; }
@@ -848,7 +881,19 @@ function select(i, autoplay = true) {
   $("selBars").innerHTML = vibeKeys.map(f => `<div><span style="width:110px">${G.featLabels[f]}</span><i><b style="width:${G.feats[f][i]/2.55}%"></b></i></div>`).join("");
   $("matchBtn").disabled = G.key[i] < 0 && !G.bpm[i];
   nb = neighbors(i);
-  highlight = new Set([i, ...nb]); applyFilter();
+  // its family (other versions of the same sound) and its closest match from another vendor
+  let fam = [];
+  if (FAM) {
+    fam = famMembers(FAM[i]).filter(j => j !== i);
+    $("famBox").style.display = fam.length ? "block" : "none";
+    $("famTitle").textContent = `Family: ${fam.length + 1} versions of this sound`;
+    $("famList").innerHTML = ""; for (const j of fam.slice(0, 24)) $("famList").appendChild(row(j));
+    const j = G.br[i], d = G.brd[i];
+    $("selBridge").innerHTML = j >= 0 && CLOSE(d) ? `Closest from another vendor (${CLOSE(d)}): <a href="#" id="brLink" style="color:var(--accent)">${G.n[j]}</a> <small>${short(G.packs[G.p[j]])}</small>`
+      : `<b>Signature sound:</b> nothing from your other vendors measures close to this one.`;
+    if ($("brLink")) { $("brLink").onclick = e => { e.preventDefault(); select(j); flyTo(j); }; $("brLink").onmouseenter = () => play(j); }
+  }
+  highlight = new Set([i, ...nb, ...fam]); applyFilter();
   $("nbrs").innerHTML = ""; for (const j of nb) $("nbrs").appendChild(row(j));
   ring.position.set(pos[i*3], pos[i*3+1], pos[i*3+2]); ring.visible = true; drawWeb();
   if (autoplay) play(i);

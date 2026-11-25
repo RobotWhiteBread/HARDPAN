@@ -42,6 +42,7 @@ map drum hits by similarity (XLN XO, Algonaut Atlas) and find similar sounds
 - **A cart that knows what it is missing.** Gather sounds per song or mood; the cart
   reports its overall feel, key and tempo, flags clashes, and fills an empty slot
   ("+ Hats") with sounds that match the rest of the cart.
+- **Sound families and vendor bridges.** Near-identical versions (tape, saturated, pitched) collapse into one sound, so you see how many distinct sounds you really own (here, about 97,000 of 184,000). Every sound also shows its closest match from a different vendor, or is marked as a signature sound when nothing else you own comes close.
 - **Your whole library, every type, on one map,** across every pack and vendor you own.
 - **Open methods.** Every measure and threshold is written out in [METHODS.md](METHODS.md).
   It is plain signal math on your own machine: no account, no upload, no subscription.

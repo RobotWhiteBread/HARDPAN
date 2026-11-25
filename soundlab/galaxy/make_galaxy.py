@@ -84,6 +84,68 @@ def tie_bands(vals, shown, n):
     return bands
 
 
+def vibe_matrix(rows):
+    """7 measures per sound, standardized, for family and bridge matching."""
+    X = np.array([[math.log(max(f(r["centroid_hz"]), 20)), f(r["crest_db"]), f(r["low_frac"]) + f(r["sub_frac"]),
+                   math.log(max(f(r["dur_s"]), 0.01)), math.sqrt(max(f(r["flatness"]), 0)),
+                   min(f(r["stereo_width"]), 1.5), -math.log(max(f(r["attack_ms"]), 1))] for r in rows], dtype=np.float32)
+    return (X - X.mean(0)) / (X.std(0) + 1e-9)
+
+
+def families(rows, X, pack_of, eps=0.03, min_overlap=0.4):
+    """Near-identical versions of one sound inside a pack (tape, saturated, 15 ips, pitched copies).
+    A sound joins a family when it measures within eps of the family's first member and shares
+    at least min_overlap of the words in its file name. Returns the family leader for every sound."""
+    words = lambda n: set(re.findall(r"[a-z]+", n.lower().rsplit(".", 1)[0]))
+    names = [SC.basename(r["Path"]) for r in rows]
+    W = [words(n) for n in names]
+    groups = defaultdict(list)
+    for i, r in enumerate(rows):
+        groups[(pack_of[i], r["sound_guess"])].append(i)
+    fam = list(range(len(rows)))
+    for g in groups.values():
+        g.sort(key=lambda i: (len(names[i]), names[i]))          # the plainest name leads its family
+        leaders, LX = [], np.zeros((0, X.shape[1]), dtype=np.float32)
+        for i in g:
+            if leaders:
+                d = ((LX - X[i]) ** 2).sum(1)
+                for j in np.argsort(d)[:5]:
+                    if d[j] >= eps:
+                        break
+                    a, b = W[i], W[leaders[j]]
+                    if a and b and len(a & b) / len(a | b) >= min_overlap:
+                        fam[i] = leaders[j]
+                        break
+                if fam[i] != i:
+                    continue
+            leaders.append(i)
+            LX = np.vstack([LX, X[i:i + 1]])
+    return fam
+
+
+def bridges(rows, X, source_of):
+    """For every sound, the closest-measuring sound of the same type from a different vendor."""
+    near, dist = np.full(len(rows), -1, dtype=np.int64), np.full(len(rows), np.inf, dtype=np.float32)
+    by_type = defaultdict(list)
+    for i, r in enumerate(rows):
+        by_type[r["sound_guess"]].append(i)
+    sq = (X ** 2).sum(1)
+    for idx in by_type.values():
+        idx = np.array(idx)
+        src = np.array([source_of[i] for i in idx])
+        for s_ in set(src):
+            a, b = idx[src == s_], idx[src != s_]
+            if not len(b):
+                continue
+            for k in range(0, len(a), 1500):
+                aa = a[k:k + 1500]
+                d = sq[aa, None] - 2 * X[aa] @ X[b].T + sq[None, b]
+                j = d.argmin(1)
+                near[aa] = b[j]
+                dist[aa] = np.maximum(d[np.arange(len(aa)), j], 0)
+    return near, dist
+
+
 def project_use(cfg, rows):
     """Which library sounds each REAPER project uses: {sound index: [project numbers]}."""
     idx = {r["Path"].lower(): i for i, r in enumerate(rows)}
@@ -298,6 +360,14 @@ def main():
             ng += 1
     print(f"  {ng} duplicate groups covering {sum(1 for d in dup if d >= 0)} files")
 
+    X = vibe_matrix(rows)
+    packs_of = [pack_names[p] for p in out["p"]]
+    fam = families(rows, X, packs_of)
+    nfam = sum(1 for i, l in enumerate(fam) if i == l)
+    print(f"  {nfam} sound families (near-identical versions grouped) from {len(rows)} sounds")
+    srcs = [pack_names[p].split("|")[0].strip() for p in out["p"]]
+    bnear, bdist = bridges(rows, X, srcs)
+    print(f"  vendor bridges found for {int((bnear >= 0).sum())} sounds")
     n_proj, proj_names, use = project_use(cfg, rows)
     print(f"  {len(use)} sounds used across {len(proj_names)} of {n_proj} REAPER projects")
 
@@ -307,6 +377,8 @@ def main():
         "featLabels": {k: l for k, l, _ in FEATS}, "feats": shown, "tieBands": bands,
         "tieBreak": {k: [G_, w] for k, (G_, _, w) in TIEBREAK.items()}, **out,
         "projects": proj_names, "projectsScanned": n_proj, "use": use,
+        "fam": fam, "br": bnear.tolist(),
+        "brd": [255 if not np.isfinite(d) else int(min(255, round(math.sqrt(d) * 100))) for d in bdist],
         "cl": lab.tolist(), "clusters": clusters, "dup": dup,
         "sx": np.round(pos[:, 0] * 10).astype(int).tolist(),
         "sy": np.round(pos[:, 1] * 10).astype(int).tolist(),

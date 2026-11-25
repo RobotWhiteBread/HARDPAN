@@ -104,6 +104,14 @@ Files with identical duration, RMS level, peak level, spectral centroid and samp
 
 On the chosen axes, the ranked space is cut into a 6 x 6 x 6 grid. A gap is a cell that holds at least 25 library sounds but 2 or fewer of the chosen type, and that touches at least one cell that does hold that type. The 12 gaps with the most of that type next door are shown.
 
+### Sound families
+
+Many packs ship several versions of one sound: clean, saturated, through tape, at 15 ips, or pitched across notes. Within each pack and sound type, sounds are sorted by file name length (the plainest name leads) and each joins the first family leader that measures within 0.03 of it (squared distance on the 7 standardized measures) and shares at least 40% of the words in its file name. Otherwise it starts a new family. "Collapse versions" shows one dot per family; selecting a sound lists its other versions, and "Sounds like this" skips them so the neighbors are genuinely different sounds.
+
+### Vendor bridges
+
+For every sound, the closest-measuring sound of the same type from a different vendor (Source) is found by exact nearest-neighbor search on the 7 standardized measures. The side panel names it when the distance is small ("nearly identical" up to 0.05, "very close" up to 0.15, "close" up to 0.4); otherwise the sound is marked as a signature sound, with nothing close from your other vendors. "Show vendor bridges" draws up to 5,000 of the closest pairs (distance 0.15 or less) as lines.
+
 ### Zoom lens ("What's here")
 
 When the camera is within 150 units of the point it orbits, a ring with a radius of 16% of that distance is drawn around the center of the view. Every visible sound inside the ring (3D distance in the current layout) is summarized: type mix, average rank on the 7 measures (named when the average is in the outer third), top packs, keys, loop tempo range, how many you have used and how many are extra copies. Eight "range" picks are chosen by farthest-point sampling on the 7 ranked measures, starting from the sound closest to the ring's average, so they show the spread of what is there rather than eight near-copies. "Next door" lists the four nearest island centers outside the ring and how each differs from the ring's average (a difference of more than 35 rank steps on a measure).
