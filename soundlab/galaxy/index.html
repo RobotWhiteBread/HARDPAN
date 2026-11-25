@@ -35,6 +35,11 @@
   #beat .cells i.now { outline:1px solid #fff; }
   #beat .ib { padding:1px 4px; font-size:11px; }
   #beat .ib.on { color:var(--accent); border-color:var(--accent); }
+  #weights { display:grid; grid-template-columns:repeat(3, 1fr); gap:2px 10px; }
+  #weights label { display:flex; align-items:center; gap:4px; font-size:11px; }
+  #weights input { width:60px; }
+  #dropZone { position:fixed; inset:0; display:none; align-items:center; justify-content:center; background:rgba(7,9,13,.75); border:3px dashed var(--accent); z-index:30; font-size:22px; color:var(--accent); pointer-events:none; }
+  body.dragging #dropZone { display:flex; }
   #kitbox { bottom:12px; right:364px; width:300px; max-height:45%; overflow:auto; display:none; }
   #cartbox { bottom:36px; left:288px; width:340px; max-height:40%; overflow:auto; display:none; border-color:#2f6b4f; }
   #cartbox h3 { font-size:11px; color:var(--dim); text-transform:uppercase; letter-spacing:.08em; margin:8px 0 2px; }
@@ -138,7 +143,7 @@
     <label class="row">Shadows on the walls <input type="checkbox" id="shadows" checked></label>
   </div>
   <label class="row">Color by
-    <select id="colorBy"><option value="type">Sound type</option><option value="key">Key</option><option value="pack">Pack</option><option value="tempo">Tempo</option><option value="island">Island</option><option value="used">Used in your projects</option></select>
+    <select id="colorBy"><option value="type">Sound type</option><option value="key">Key</option><option value="pack">Pack</option><option value="tempo">Tempo</option><option value="island">Island</option><option value="used">Used in your projects</option><option value="source">Vendor (and your own folders)</option></select>
   </label>
   <label class="row">Dot size <input type="range" id="size" min="1" max="12" value="4" style="width:150px"></label>
   <label class="row">Island names <input type="checkbox" id="islandNames" checked></label>
@@ -172,7 +177,7 @@
   <label class="row">Look at <select id="gapType"><option value="">pick a type</option></select></label>
   <div id="gaps"></div>
 
-  <div class="hint">Drag to orbit, scroll to zoom, right-drag to pan. Hover to hear. Click a dot for its closest matches. Shift+click (or Cart mode) drops it in your cart. Find a sound lists matches you can play with the arrow keys; B draws a box on the map. In Sound types, double-click a galaxy to focus it. Used vs owned shows what your projects actually use. Zoom in and the What's here panel describes the sounds inside the purple ring. Esc clears, Space plays or stops.</div>
+  <div class="hint">Drag to orbit, scroll to zoom, right-drag to pan. Hover to hear. Click a dot for its closest matches. Shift+click (or Cart mode) drops it in your cart. Find a sound lists matches you can play with the arrow keys; B draws a box on the map. In Sound types, double-click a galaxy to focus it. Used vs owned shows what your projects actually use. Zoom in and the What's here panel describes the sounds inside the purple ring. Drop any audio file on the page to find what you own that is closest to it. Esc clears, Space plays or stops.</div>
 </div>
 
 <div id="right" class="panel">
@@ -201,11 +206,13 @@
     <div class="btns"><button class="primary" id="fillAdd">Add all to kit</button><button id="fillRoll">Reroll</button></div>
   </div>
   <h2>Sounds like this <label style="text-transform:none;letter-spacing:0;float:right;font-weight:400"><input type="checkbox" id="sameType" checked> same type</label></h2>
+  <div id="weights" class="hint" style="margin-top:0"></div>
   <div class="list" id="nbrs"></div>
 </div>
 
 <div id="legend" class="panel"></div>
 <div id="boxRect"></div>
+<div id="dropZone">Drop a sound to find what in your library is closest to it</div>
 
 <div id="shop" class="panel">
   <div style="display:flex;justify-content:space-between;align-items:center;gap:6px">
@@ -668,6 +675,8 @@ function drawIslandList() {
   }
 }
 
+const srcNames = [...new Set(G.packs.map(p => p.split("|")[0].trim()))];
+const srcOf = G.packs.map(p => srcNames.indexOf(p.split("|")[0].trim()));
 function hsl(h, s, l) { return new THREE.Color().setHSL(h, s, l); }
 function colorize() {
   const mode = $("colorBy").value, tc = G.types.map(t => new THREE.Color(TYPE_COLOR[t] || "#888"));
@@ -678,6 +687,7 @@ function colorize() {
     else if (mode === "key") { const k = G.key[i]; c = k < 0 ? hsl(0,0,.25) : hsl(fifths.indexOf(k%12)/12, k>=12?.55:.85, k>=12?.5:.6); }
     else if (mode === "pack") c = hsl((G.p[i]*0.61803398875)%1, .7, .58);
     else if (mode === "island") c = hsl((G.cl[i]*0.61803398875)%1, .75, .58);
+    else if (mode === "source") c = hsl((srcOf[G.p[i]] * 0.61803398875 + .05) % 1, .8, .6);
     else if (mode === "used") c = useCount[i] ? hsl(.11, .95, Math.min(.5 + useCount[i]*.05, .78)) : hsl(.6, .12, .17);
     else { const b = G.bpm[i]; c = b ? hsl(.66 - Math.min(Math.max((b-60)/120,0),1)*.66, .85, .55) : hsl(0,0,.22); }
     col[i*3] = c.r; col[i*3+1] = c.g; col[i*3+2] = c.b;
@@ -866,6 +876,17 @@ function describe(i) {
   return bits.join(" · ");
 }
 function vibeDist(i, j, keys = vibeKeys) { let d = 0; for (const k of keys) { const x = G.feats[k][i] - G.feats[k][j]; d += x*x; } return d; }
+// what "sounds like" means is yours to weigh: tone, envelope, low end, length, stereo space, tempo (like Sononym's aspects)
+const ASPECTS = [["tone", "Tone", ["bright", "noise"]], ["env", "Punch and attack", ["punch", "snap"]], ["low", "Low end", ["body"]], ["len", "Length", ["length"]], ["space", "Width", ["width"]], ["tempo", "Tempo", []]];
+const W = Object.fromEntries(ASPECTS.map(a => [a[0], 1]));
+const featW = k => { for (const a of ASPECTS) if (a[2].includes(k)) return W[a[0]]; return 1; };
+function wDist(i, j) { let d = 0; for (const k of vibeKeys) { const x = G.feats[k][i] - G.feats[k][j]; d += featW(k) * x * x; } return d; }
+for (const [key, label] of ASPECTS) {
+  const l = document.createElement("label"); l.title = "0 ignores it, 3 makes it matter most";
+  l.innerHTML = `${label}<input type="range" min="0" max="3" step="0.5" value="1">`;
+  l.querySelector("input").onchange = e => { W[key] = +e.target.value; e.target.blur(); if (sel >= 0) select(sel, false); };
+  $("weights").appendChild(l);
+}
 function neighbors(i, k = 14) {
   const same = $("sameType").checked, one = $("oneEach").checked, heap = [];
   for (let j = 0; j < N; j++) {
@@ -873,8 +894,8 @@ function neighbors(i, k = 14) {
     if (G.dup[i] >= 0 && G.dup[j] === G.dup[i]) continue;               // a copy is not a neighbor
     if (FAM && FAM[j] === FAM[i]) continue;                             // nor another version of the same sound
     if (one && G.dup[j] >= 0 && dupFirst.get(G.dup[j]) !== j) continue;
-    let d = vibeDist(i, j);
-    if (G.bpm[i] && G.bpm[j]) { const x = (G.bpm[i] - G.bpm[j]) * 2; d += x*x; }
+    let d = wDist(i, j);
+    if (G.bpm[i] && G.bpm[j]) { const x = (G.bpm[i] - G.bpm[j]) * 2; d += W.tempo * x*x; }
     if (heap.length < k) { heap.push([d, j]); heap.sort((a,b)=>a[0]-b[0]); }
     else if (d < heap[k-1][0]) { heap[k-1] = [d, j]; heap.sort((a,b)=>a[0]-b[0]); }
   }
@@ -1489,6 +1510,68 @@ $("beatRoll").onclick = () => { beat.rows.forEach(r => { if (!r.lock) r.sound = 
 $("beatCart").onclick = () => { for (const r of beat.rows) { if (r.lock) continue; const c = cart.filter(j => r.types.includes(typeName(j))).sort((a, b) => stars.has(pathOf(b)) - stars.has(pathOf(a))); if (c.length) r.sound = c[0]; load(r.sound); } drawBeat(); };
 $("beatToCart").onclick = () => beat.rows.forEach(r => r.sound >= 0 && addToCart(r.sound));
 ["beatBpm"].forEach(id => $(id).onchange = () => $(id).blur());
+
+// ---------- drop a file: measure it in the browser the same way analyze_samples.py does, then find its neighbors ----------
+function fftMag(frame) {                           // radix-2 FFT magnitude, bins 0..N/2
+  const n = frame.length, re = Float64Array.from(frame), im = new Float64Array(n);
+  for (let i = 1, j = 0; i < n; i++) { let bit = n >> 1; for (; j & bit; bit >>= 1) j ^= bit; j ^= bit; if (i < j) { [re[i], re[j]] = [re[j], re[i]]; } }
+  for (let len = 2; len <= n; len <<= 1) {
+    const ang = -2 * Math.PI / len, wr = Math.cos(ang), wi = Math.sin(ang);
+    for (let i = 0; i < n; i += len) { let cr = 1, ci = 0;
+      for (let k = 0; k < len / 2; k++) { const a = i + k, b = a + len / 2, tr = re[b] * cr - im[b] * ci, ti = re[b] * ci + im[b] * cr;
+        re[b] = re[a] - tr; im[b] = im[a] - ti; re[a] += tr; im[a] += ti; const ncr = cr * wr - ci * wi; ci = cr * wi + ci * wr; cr = ncr; } }
+  }
+  const out = new Float64Array(n / 2 + 1); for (let k = 0; k <= n / 2; k++) out[k] = Math.hypot(re[k], im[k]); return out;
+}
+function measure(ab) {
+  const sr = ab.sampleRate, len = Math.min(ab.length, Math.floor(sr * 30)), ch = ab.numberOfChannels;
+  const chans = Array.from({ length: ch }, (_, c) => ab.getChannelData(c)), y = new Float32Array(Math.max(len, 2048));
+  let side = 0, mid = 0;
+  for (let i = 0; i < len; i++) { let s = 0; for (const c of chans) s += c[i]; y[i] = s / ch;
+    if (ch >= 2) { const m = (chans[0][i] + chans[1][i]) / 2, d = (chans[0][i] - chans[1][i]) / 2; mid += m * m; side += d * d; } }
+  let peak = 0, sq = 0; for (let i = 0; i < len; i++) { const a = Math.abs(y[i]); if (a > peak) peak = a; sq += y[i] * y[i]; }
+  const rms = Math.sqrt(sq / Math.max(1, len)), NF = 2048, H = 512, nfr = 1 + Math.floor((Math.max(len, NF) - NF) / H);
+  const win = Float64Array.from({ length: NF }, (_, k) => 0.5 - 0.5 * Math.cos(2 * Math.PI * k / (NF - 1)));
+  const spec = new Float64Array(NF / 2 + 1), pw = new Float64Array(NF / 2 + 1), env = new Float64Array(nfr), fr = new Float64Array(NF);
+  for (let f = 0; f < nfr; f++) {
+    for (let k = 0; k < NF; k++) fr[k] = y[f * H + k] * win[k];
+    const m = fftMag(fr); let e = 0;
+    for (let b = 0; b < m.length; b++) { spec[b] += m[b]; pw[b] += m[b] * m[b]; e += m[b] * m[b]; }
+    env[f] = Math.sqrt(e / m.length);
+  }
+  let tot = 1e-12, cn = 0, cd = 0, lg = 0, ar = 0; const fq = b => b * sr / NF;
+  for (let b = 0; b < spec.length; b++) { const sm = spec[b] / nfr + 1e-12; tot += pw[b]; cn += fq(b) * sm; cd += sm; lg += Math.log(sm); ar += sm; }
+  const band = (lo, hi) => { let s = 0; for (let b = 0; b < pw.length; b++) if (fq(b) >= lo && fq(b) < hi) s += pw[b]; return s / tot; };
+  let pk = 0; for (let f = 1; f < nfr; f++) if (env[f] > env[pk]) pk = f;
+  const db = x => 20 * Math.log10(Math.max(x, 1e-9));
+  const c = cn / cd, flat = Math.exp(lg / spec.length) / (ar / spec.length), att = pk * H / sr * 1000;
+  const width = ch >= 2 ? Math.sqrt(side / len) / (Math.sqrt(mid / len) + 1e-9) : 0;
+  return { bright: Math.log(Math.max(c, 20)), punch: db(peak) - db(rms), body: band(60, 250) + band(20, 60), length: Math.log(Math.max(ab.duration, 0.01)),
+           noise: Math.sqrt(Math.max(flat, 0)), width: Math.min(width, 1.5), snap: -Math.log(Math.max(att, 1)), _c: c, _att: att, _dur: ab.duration };
+}
+const toRank = (k, v) => { const q = (G.featQ || {})[k]; if (!q || !q.length) return 128; let lo = 0, hi = q.length - 1;
+  while (lo < hi) { const m = (lo + hi) >> 1; if (q[m] < v) lo = m + 1; else hi = m; } return Math.round(1 + 254 * lo / (q.length - 1)); };
+const dropMark = makeLabel("your sound", "#ffffff", 26); dropMark.visible = false; scene.add(dropMark);
+async function dropSearch(file) {
+  if (!G.featQ) { $("status").textContent = "Rebuild the Galaxy (py soundlab.py galaxy) to enable drop-a-file search."; return; }
+  $("status").textContent = `Measuring ${file.name}...`;
+  let ab; try { ab = await ctx().decodeAudioData(await file.arrayBuffer()); } catch (e) { $("status").textContent = `Couldn't read ${file.name} as audio.`; return; }
+  const m = measure(ab), r = Object.fromEntries(vibeKeys.map(k => [k, toRank(k, m[k])]));
+  const sc = [];
+  for (let j = 0; j < N; j++) { if (vis[j] < 0.9 || (FAM && FAM[j] !== j)) continue; let d = 0; for (const k of vibeKeys) { const x = r[k] - G.feats[k][j]; d += featW(k) * x * x; } sc.push([d, j]); }
+  sc.sort((a, b) => a[0] - b[0]); const top = sc.slice(0, 300);
+  if (!top.length) return;
+  const words = vibeKeys.map(k => r[k] < 80 ? (WORD[k] || ["", ""])[0] : r[k] > 175 ? (WORD[k] || ["", ""])[1] : "").filter(Boolean).join(", ") || "middle of the road";
+  listFrom(top.map(x => x[1]), `Closest to your file "${file.name}" (measured as ${words}, ${Math.round(m._c)} Hz centroid, ${m._dur.toFixed(2)} s)`, top.map(x => x[0]));
+  const best = top[0][1]; const p = new THREE.Vector3(pos[best*3], pos[best*3+1], pos[best*3+2]);
+  dropMark.position.set(p.x, p.y + 6, p.z); dropMark.visible = true; fly = { from: controls.target.clone(), to: p, t: 0 }; controls.autoRotate = false;
+  const a = new Audio(URL.createObjectURL(file)); a.play().catch(() => {});
+}
+let dragDepth = 0;
+addEventListener("dragenter", e => { if ([...(e.dataTransfer?.types || [])].includes("Files")) { dragDepth++; document.body.classList.add("dragging"); } });
+addEventListener("dragleave", () => { if (--dragDepth <= 0) { dragDepth = 0; document.body.classList.remove("dragging"); } });
+addEventListener("dragover", e => e.preventDefault());
+addEventListener("drop", e => { e.preventDefault(); dragDepth = 0; document.body.classList.remove("dragging"); const f = e.dataTransfer?.files?.[0]; if (f) dropSearch(f); });
 
 // ---------- mouse ----------
 let down = null, lastHover = -1, hoverT = 0;

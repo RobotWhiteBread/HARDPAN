@@ -94,7 +94,15 @@ Focusing a type lists the islands that hold at least 8 of its sounds (copies cou
 
 ### Neighbors ("Sounds like this")
 
-Euclidean distance over the 7 ranked measures. When both sounds have a tempo, `(2 x BPM difference)^2` is added. Exact copies of the selected sound are skipped. The 14 closest are listed.
+Weighted Euclidean distance over the 7 ranked measures. Each measure belongs to one aspect with its own slider (0 to 3, default 1): tone (brightness, noise), punch and attack (punch, snap), low end (body), length, and width. When both sounds have a tempo, `tempo weight x (2 x BPM difference)^2` is added. Exact copies and members of the same sound family are skipped. The 14 closest are listed.
+
+### Drop a file
+
+A dropped file is decoded by the browser and measured there with the same steps as `analyze_samples.py`: mono mix of the first 30 seconds, 2048-point Hann frames with a 512 hop, spectral centroid, spectral flatness, peak-to-RMS crest, the share of energy from 20 to 250 Hz, time to the loudest frame, duration, and side-to-mid ratio for width. Each value goes through the same transform as the library (for example log of centroid) and is then placed on the library's 1 to 255 scale by finding where it falls among 256 stored quantiles of that measure (`featQ` in galaxy_data.js). The nearest sounds use the weighted distance above. Small differences from the Python measures are expected (the browser resamples some formats), so treat the match as close, not exact. The file never leaves your computer.
+
+### Color by vendor
+
+Each top-level source (the `name` of a sample folder) gets its own hue. Name a folder of your own recordings "Mine" to see where they sit among the packs.
 
 ### Extra copies
 

@@ -339,6 +339,11 @@ def main():
         second = [None if v is None else tb[1] * v for v in raw[tb[0]]] if tb else None
         shown[key] = rank_quantize(raw[key], second)
         bands[key] = tie_bands(raw[key], shown[key], len(rows))
+    # raw value at each of 256 quantiles, so the page can place a dropped-in file on the same rank scales
+    featQ = {}
+    for key in raw:
+        v = np.array(sorted(x for x in raw[key] if x is not None), dtype=float)
+        featQ[key] = [round(float(v[min(len(v) - 1, int(q * (len(v) - 1)))]), 5) for q in np.linspace(0, 1, 256)] if len(v) else []
 
     inv = lambda d: [k for k, _ in sorted(d.items(), key=lambda kv: kv[1])]
     type_names, pack_names, char_names = inv(types), inv(packs), inv(chars)
@@ -374,7 +379,7 @@ def main():
     data = {
         "count": len(rows), "types": type_names, "packs": pack_names, "dirs": inv(dirs),
         "notes": inv(notes), "chars": char_names, "keys": KEYS,
-        "featLabels": {k: l for k, l, _ in FEATS}, "feats": shown, "tieBands": bands,
+        "featLabels": {k: l for k, l, _ in FEATS}, "feats": shown, "tieBands": bands, "featQ": featQ,
         "tieBreak": {k: [G_, w] for k, (G_, _, w) in TIEBREAK.items()}, **out,
         "projects": proj_names, "projectsScanned": n_proj, "use": use,
         "fam": fam, "br": bnear.tolist(),

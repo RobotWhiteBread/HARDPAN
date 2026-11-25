@@ -1,6 +1,8 @@
 """
 soundlab: one command for every step.
 
+  python soundlab.py setup [--deep] [--mine FOLDER]
+                                      find your sample folders and write soundlab.json for you
   python soundlab.py all              build the library, measure every sound, make waveforms, open the Galaxy
   python soundlab.py build            step 1: catalog your sample folders (and browse folders for REAPER)
   python soundlab.py analyze [--test] step 2: measure every sound (resumable; --test does 300)
@@ -66,7 +68,9 @@ def main():
         print(__doc__)
         return
     cmd, rest = sys.argv[1], sys.argv[2:]
-    if cmd == "build":
+    if cmd == "setup":
+        run("setup_wizard.py", *rest)
+    elif cmd == "build":
         run("build_library.py", *rest)
     elif cmd == "analyze":
         run("analyze_samples.py", *(["--limit", "300"] if "--test" in rest else [a for a in rest if a != "--test"]))
