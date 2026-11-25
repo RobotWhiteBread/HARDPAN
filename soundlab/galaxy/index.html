@@ -11,6 +11,17 @@
   .panel { position:fixed; background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:12px; backdrop-filter:blur(6px); }
   #left { top:12px; left:12px; width:262px; max-height:calc(100% - 24px); overflow:auto; }
   #right { top:12px; right:12px; width:340px; max-height:calc(100% - 24px); overflow:auto; display:none; }
+  #lens { bottom:12px; right:12px; width:340px; max-height:52%; overflow:auto; display:none; border-color:#4a3f6b; }
+  #lens .mix { display:flex; height:8px; border-radius:4px; overflow:hidden; margin:4px 0 2px; }
+  #lens .mix span { display:block; height:100%; }
+  #lens .pick { display:grid; grid-template-columns:62px 1fr auto; gap:6px; align-items:center; padding:3px 4px; border-radius:6px; cursor:pointer; font-size:12px; }
+  #lens .pick:hover { background:#1a2230; }
+  #lens .pick canvas { width:62px; height:18px; }
+  #lens .pick span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  #lens .pick small, #lens .door small { color:var(--dim); font-size:10.5px; }
+  #lens .door { cursor:pointer; padding:2px 4px; border-radius:6px; font-size:12px; }
+  #lens .door:hover { background:#1a2230; }
+  body.lensOpen #right { max-height:calc(46% - 12px); }
   #kitbox { bottom:12px; right:364px; width:300px; max-height:45%; overflow:auto; display:none; }
   #cartbox { bottom:36px; left:288px; width:340px; max-height:40%; overflow:auto; display:none; border-color:#2f6b4f; }
   #cartbox h3 { font-size:11px; color:var(--dim); text-transform:uppercase; letter-spacing:.08em; margin:8px 0 2px; }
@@ -122,6 +133,7 @@
   <label class="row">One of each (hide copies) <input type="checkbox" id="oneEach"></label>
   <label class="row">Play on hover <input type="checkbox" id="hoverPlay" checked></label>
   <label class="row">Cart mode: click adds (C) <input type="checkbox" id="cartMode"></label>
+  <label class="row">Zoom lens: details as you zoom in <input type="checkbox" id="lensOn" checked></label>
 
   <h2>Find</h2>
   <input type="text" id="search" placeholder="name or pack, e.g. sp1200 kick">
@@ -144,7 +156,7 @@
   <label class="row">Look at <select id="gapType"><option value="">pick a type</option></select></label>
   <div id="gaps"></div>
 
-  <div class="hint">Drag to orbit, scroll to zoom, right-drag to pan. Hover to hear. Click a dot for its closest matches. Shift+click (or Cart mode) drops it in your cart. Find a sound lists matches you can play with the arrow keys; B draws a box on the map. In Sound types, double-click a galaxy to focus it. Used vs owned shows what your projects actually use. Esc clears, Space plays or stops.</div>
+  <div class="hint">Drag to orbit, scroll to zoom, right-drag to pan. Hover to hear. Click a dot for its closest matches. Shift+click (or Cart mode) drops it in your cart. Find a sound lists matches you can play with the arrow keys; B draws a box on the map. In Sound types, double-click a galaxy to focus it. Used vs owned shows what your projects actually use. Zoom in and the What's here panel describes the sounds inside the purple ring. Esc clears, Space plays or stops.</div>
 </div>
 
 <div id="right" class="panel">
@@ -235,6 +247,11 @@
   <div class="list" id="kit"></div>
   <div class="btns"><button class="primary" id="saveKit">Save kit</button><button id="clearKit">Clear</button></div>
   <div class="hint">Saves soundlab_kit.txt to Downloads. Then run Soundlab_Kit_Builder.lua in REAPER.</div>
+</div>
+
+<div id="lens" class="panel">
+  <div style="display:flex;justify-content:space-between;align-items:center"><h1 style="margin:0">WHAT'S HERE</h1><small id="lensCount" style="color:var(--dim)"></small></div>
+  <div id="lensBody"></div>
 </div>
 
 <div id="cartbox" class="panel">
@@ -562,7 +579,7 @@ function afterMove() {
       const s = makeLabel(short(G.packs[p]), "#" + c.getHexString(), 20); s.position.set(a[0]/a[3], a[1]/a[3], a[2]/a[3]); packLabels.add(s); });
   }
   if (sel >= 0) { ring.position.set(pos[sel*3], pos[sel*3+1], pos[sel*3+2]); drawWeb(); }
-  drawGaps(); drawShadows();
+  drawGaps(); drawShadows(); islandCenters = null; lensKey = "";
 }
 $("islandNames").onchange = afterMove; $("packNames").onchange = afterMove;
 
@@ -677,6 +694,7 @@ function applyFilter() {
     vis[i] = v; if (v >= 1) shown++;
   }
   geo.attributes.vis.needsUpdate = true;
+  lensKey = "";
   clearTimeout(shadowT); shadowT = setTimeout(() => tween >= 1 && drawShadows(), 120);
   $("status").textContent = `${shown.toLocaleString()} sounds showing` + (matchOn && sel >= 0 ? " that match the key and tempo" : "");
 }
@@ -1203,6 +1221,107 @@ addEventListener("pointerup", e => {
   listFrom(idx, `${idx.length.toLocaleString()} sounds in your box (${mix}), closest to its center first`, sc);
 });
 
+// ---------- zoom lens: zoom in and a panel describes the neighborhood in the middle of the view ----------
+const lensRing = new THREE.Mesh(new THREE.RingGeometry(0.97, 1, 64), new THREE.MeshBasicMaterial({ color:0xa78bfa, side:THREE.DoubleSide, transparent:true, opacity:.35 }));
+lensRing.visible = false; scene.add(lensRing);
+let lensKey = "", lensT = 0, lensHere = [], islandCenters = null;
+function centersNow() {                                   // where each island sits in the current layout
+  const acc = G.clusters.map(() => [0, 0, 0, 0]);
+  for (let i = 0; i < N; i++) { const a = acc[G.cl[i]]; a[0] += pos[i*3]; a[1] += pos[i*3+1]; a[2] += pos[i*3+2]; a[3]++; }
+  return acc.map(a => a[3] ? [a[0]/a[3], a[1]/a[3], a[2]/a[3], a[3]] : null);
+}
+function spreadPicks(idx, k) {                            // k sounds as different from each other as possible (farthest-point sampling)
+  const pool = idx.length > 3000 ? idx.filter((_, n) => n % Math.ceil(idx.length / 3000) === 0) : idx.slice();
+  if (!pool.length) return [];
+  const mean = vibeKeys.map(f => pool.reduce((a, i) => a + G.feats[f][i], 0) / pool.length);
+  let first = pool[0], bd = Infinity;
+  for (const i of pool) { const d = vibeKeys.reduce((a, f, n) => a + (G.feats[f][i] - mean[n]) ** 2, 0); if (d < bd) { bd = d; first = i; } }
+  const out = [first], dmin = new Float64Array(pool.length).fill(Infinity);
+  while (out.length < Math.min(k, pool.length)) {
+    const last = out[out.length - 1]; let best = -1, bv = -1;
+    pool.forEach((i, n) => { const d = vibeDist(i, last); if (d < dmin[n]) dmin[n] = d; if (dmin[n] > bv && !out.includes(i)) { bv = dmin[n]; best = i; } });
+    if (best < 0) break; out.push(best);
+  }
+  return out;
+}
+const WORD = { bright:["dark","bright"], punch:["soft","punchy"], body:["thin","heavy"], length:["short","long"], noise:["tonal","noisy"], width:["mono","wide"], snap:["slow","snappy"] };
+function updateLens(force) {
+  const on = $("lensOn").checked, dist = camera.position.distanceTo(controls.target);
+  if (!on || dist > 150 || tween < 1) { $("lens").style.display = "none"; document.body.classList.remove("lensOpen"); lensRing.visible = false; lensKey = ""; return; }
+  const r = Math.max(4, dist * 0.16), c = controls.target;
+  const key = [c.x, c.y, c.z, r].map(v => Math.round(v * 2)).join(",") + $("colorBy").value;
+  if (!force && key === lensKey) { lensRing.position.copy(c); lensRing.scale.setScalar(r); lensRing.lookAt(camera.position); return; }
+  lensKey = key;
+  const here = [], r2 = r * r;
+  for (let i = 0; i < N; i++) {
+    if (vis[i] < 0.9) continue;
+    const dx = pos[i*3] - c.x, dy = pos[i*3+1] - c.y, dz = pos[i*3+2] - c.z, d = dx*dx + dy*dy + dz*dz;
+    if (d <= r2) here.push([d, i]);
+  }
+  lensRing.position.copy(c); lensRing.scale.setScalar(r); lensRing.lookAt(camera.position); lensRing.visible = true;
+  if (here.length < 5) { $("lens").style.display = "block"; document.body.classList.add("lensOpen"); $("lensCount").textContent = ""; $("lensBody").innerHTML = `<div class="note">Quiet space: fewer than 5 sounds inside the ring. Pan toward the dots, or zoom out a little.</div>`; lensHere = []; return; }
+  here.sort((a, b) => a[0] - b[0]); lensHere = here.map(x => x[1]);
+  const n = lensHere.length;
+  // what kinds of sound, which packs, which islands
+  const tc = {}, pc = {}, cc = {}, keys = {}; let used = 0, copies = 0; const bpms = [];
+  for (const i of lensHere) {
+    tc[G.t[i]] = (tc[G.t[i]] || 0) + 1; const p = short(G.packs[G.p[i]]); pc[p] = (pc[p] || 0) + 1; cc[G.cl[i]] = (cc[G.cl[i]] || 0) + 1;
+    if (G.key[i] >= 0) keys[G.key[i]] = (keys[G.key[i]] || 0) + 1;
+    if (useCount[i]) used++; if (G.dup[i] >= 0 && dupFirst.get(G.dup[i]) !== i) copies++;
+    if (G.bpm[i] && typeName(i) === "loop") bpms.push(G.bpm[i]);
+  }
+  const top = (o, k) => Object.entries(o).sort((a, b) => b[1] - a[1]).slice(0, k);
+  const mix = top(tc, 9).map(([t, m]) => `<span title="${TYPE_LABEL[G.types[t]] || G.types[t]}: ${m}" style="width:${100 * m / n}%;background:${TYPE_COLOR[G.types[t]] || "#888"}"></span>`).join("");
+  const mixTxt = top(tc, 3).map(([t, m]) => `${Math.round(100 * m / n)}% ${(TYPE_LABEL[G.types[t]] || G.types[t]).toLowerCase()}`).join(", ");
+  // the neighborhood's character: average rank on each measure, with words for the strong ones
+  const prof = vibeKeys.map(f => lensHere.reduce((a, i) => a + G.feats[f][i], 0) / n);
+  const words = vibeKeys.map((f, k) => prof[k] < 80 ? WORD[f][0] : prof[k] > 175 ? WORD[f][1] : "").filter(Boolean);
+  const bars = vibeKeys.map((f, k) => `<div><span style="width:96px">${G.featLabels[f].replace(" (fast attack)", "")}</span><i><b style="width:${prof[k] / 2.55}%"></b></i></div>`).join("");
+  bpms.sort((a, b) => a - b);
+  const facts = [
+    `<b>${n.toLocaleString()}</b> sounds: ${mixTxt}`,
+    words.length ? `Mostly <b>${words.join(", ")}</b>` : "Middle of the road on every measure",
+    `Packs: ${top(pc, 3).map(([p, m]) => `${p} (${m})`).join(", ")}${Object.keys(pc).length > 3 ? `, +${Object.keys(pc).length - 3} more` : ""}`,
+    Object.keys(keys).length ? `Keys: ${top(keys, 3).map(([k, m]) => `${G.keys[k]} (${m})`).join(", ")}` : "",
+    bpms.length ? `Loops: ${bpms.length}, ${bpms[0]} to ${bpms[bpms.length - 1]} BPM (middle ${bpms[Math.floor(bpms.length / 2)]})` : "",
+    `You have used <b>${used}</b> of these${copies ? ` · ${copies} are extra copies` : ""}`,
+  ].filter(Boolean).map(t => `<div class="gap">${t}</div>`).join("");
+  // islands inside the ring, and the nearest ones just outside it
+  if (!islandCenters) islandCenters = centersNow();
+  const inside = top(cc, 3).map(([k, m]) => `<div class="door" data-c="${k}">${G.clusters[k].label} <small>${m} here</small></div>`).join("");
+  const insideSet = new Set(Object.keys(cc).map(Number));
+  const doors = islandCenters.map((ct, k) => ct && !insideSet.has(k) ? [((ct[0]-c.x)**2 + (ct[1]-c.y)**2 + (ct[2]-c.z)**2), k] : null).filter(Boolean).sort((a, b) => a[0] - b[0]).slice(0, 4).map(([, k]) => {
+    const m = []; for (let i = 0; i < N; i += 7) if (G.cl[i] === k) m.push(i);
+    const diff = vibeKeys.map((f, j) => [f, (m.reduce((a, i) => a + G.feats[f][i], 0) / Math.max(1, m.length)) - prof[j]]).filter(x => Math.abs(x[1]) > 35).sort((a, b) => Math.abs(b[1]) - Math.abs(a[1])).slice(0, 2);
+    const how = diff.length ? diff.map(([f, d]) => (d > 0 ? "more " + WORD[f][1] : "more " + WORD[f][0])).join(", ") : "similar";
+    return `<div class="door" data-c="${k}">${G.clusters[k].label} <small>${how}</small></div>`;
+  }).join("");
+  // a handful of sounds that show the range of what is here
+  const picks = spreadPicks(lensHere, 8);
+  $("lens").style.display = "block"; document.body.classList.add("lensOpen"); $("lensCount").textContent = `ring ${Math.round(r)} wide`;
+  $("lensBody").innerHTML = `<div class="mix">${mix}</div>${facts}<div class="bars" style="margin-top:6px">${bars}</div>
+    <h2>The range of what's here</h2><div id="lensPicks"></div>
+    <div class="btns"><button class="primary" id="lensList">List all ${n.toLocaleString()}</button><button id="lensCart">Picks to cart</button><button id="lensPlay">Play the picks</button></div>
+    <h2>Islands in the ring</h2>${inside}<h2>Next door</h2>${doors}`;
+  for (const j of picks) {
+    const d = document.createElement("div"); d.className = "pick";
+    const cv = document.createElement("canvas"); if (!drawWave(cv, j, 62, 18)) cv.style.visibility = "hidden";
+    d.appendChild(cv);
+    const t = document.createElement("span"); t.innerHTML = `${G.n[j]}<br><small>${TYPE_LABEL[typeName(j)] || typeName(j)}${G.key[j] >= 0 ? " · " + G.keys[G.key[j]] : ""}${G.bpm[j] ? " · " + G.bpm[j] + " BPM" : ""}</small>`; d.appendChild(t);
+    const a = document.createElement("small"); a.textContent = "+ cart"; a.onclick = e => { e.stopPropagation(); addToCart(j); }; d.appendChild(a);
+    d.onmouseenter = () => play(j); d.onclick = () => { select(j, true); };
+    $("lensPicks").appendChild(d);
+  }
+  $("lensList").onclick = () => listFrom(lensHere, `${n.toLocaleString()} sounds inside the zoom ring, closest to the center first`, lensHere.map((_, k) => k));
+  $("lensCart").onclick = () => picks.forEach(j => addToCart(j));
+  $("lensPlay").onclick = () => { let k = 0; const step = () => { if (k < picks.length) { play(picks[k++]); setTimeout(step, 1100); } }; step(); };
+  $("lensBody").querySelectorAll(".door").forEach(el => el.onclick = () => {
+    const ct = islandCenters[+el.dataset.c]; if (!ct) return;
+    fly = { from: controls.target.clone(), to: new THREE.Vector3(ct[0], ct[1], ct[2]), t: 0 }; controls.autoRotate = false;
+  });
+}
+$("lensOn").onchange = () => updateLens(true);
+
 // ---------- mouse ----------
 let down = null, lastHover = -1, hoverT = 0;
 const tipWave = document.createElement("canvas");
@@ -1274,6 +1393,7 @@ if (!TH) $("status").textContent += "  ·  waveforms not made yet (run Open-Gala
     if (age >= 1) { scene.remove(f.m); flashes.splice(k, 1); continue; }
     f.m.scale.setScalar(1 + age * 3); f.m.material.opacity = 1 - age; f.m.lookAt(camera.position);
   }
+  if (performance.now() - lensT > 350) { lensT = performance.now(); updateLens(false); }
   controls.update(); renderer.render(scene, camera);
 })();
 </script>

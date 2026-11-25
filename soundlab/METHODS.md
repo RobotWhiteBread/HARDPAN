@@ -104,7 +104,11 @@ Files with identical duration, RMS level, peak level, spectral centroid and samp
 
 On the chosen axes, the ranked space is cut into a 6 x 6 x 6 grid. A gap is a cell that holds at least 25 library sounds but 2 or fewer of the chosen type, and that touches at least one cell that does hold that type. The 12 gaps with the most of that type next door are shown.
 
-### Used vs owned
+### Zoom lens ("What's here")
+
+When the camera is within 150 units of the point it orbits, a ring with a radius of 16% of that distance is drawn around the center of the view. Every visible sound inside the ring (3D distance in the current layout) is summarized: type mix, average rank on the 7 measures (named when the average is in the outer third), top packs, keys, loop tempo range, how many you have used and how many are extra copies. Eight "range" picks are chosen by farthest-point sampling on the 7 ranked measures, starting from the sound closest to the ring's average, so they show the spread of what is there rather than eight near-copies. "Next door" lists the four nearest island centers outside the ring and how each differs from the ring's average (a difference of more than 35 rank steps on a measure).
+
+
 
 Every `.rpp` file under your project folders (`project_folders` in soundlab.json, or `projects` if that is not set) is read, skipping `Backups` and `_upgrades` folders and anything matching `exclude` or `exclude_projects`. Every `FILE "..."` line is matched to the library by exact file path, ignoring case. A sound counts as used once per project that references it.
 

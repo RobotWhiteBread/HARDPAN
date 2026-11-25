@@ -2,6 +2,8 @@
 
 A new way to see and use the sample library you already own.
 
+**Works with any DAW.** The Sound Galaxy, Find a sound, the cart and Used vs owned run in your browser on any folder of samples (WAV, AIFF, FLAC), on Windows, Mac or Linux. Saved carts become plain folders you can browse from Ableton, FL Studio, Logic, Bitwig or anything else. REAPER users get extra tools: lay out a cart as a project, build kits, and upgrade samples in existing projects. Used vs owned reads REAPER projects today; Ableton and FL Studio project support is planned.
+
 Most producers reach for a tiny slice of what they own. On the author's machine,
 177 REAPER projects use 901 of 181,927 sounds: half of one percent. soundlab
 measures every sample you own, lays them all out on one 3D map so similar sounds
