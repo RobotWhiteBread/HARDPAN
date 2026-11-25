@@ -5,7 +5,7 @@ A new way to see and use the sample library you already own.
 **Works with any DAW.** The Sound Galaxy, Find a sound, the cart and Used vs owned run in your browser on any folder of samples (WAV, AIFF, FLAC), on Windows, Mac or Linux. Saved carts become plain folders you can browse from Ableton, FL Studio, Logic, Bitwig or anything else. REAPER users get extra tools: lay out a cart as a project, build kits, and upgrade samples in existing projects. Used vs owned reads REAPER projects today; Ableton and FL Studio project support is planned.
 
 Most producers reach for a tiny slice of what they own. On the author's machine,
-177 REAPER projects use 901 of 181,927 sounds: half of one percent. soundlab
+177 REAPER projects use 901 of about 185,000 sounds: half of one percent. soundlab
 measures every sample you own, lays them all out on one 3D map so similar sounds
 sit together, shows you which ones you actually use, and helps you find the
 right sound fast when you need it. Hover to hear, click for the closest matches,
@@ -42,7 +42,7 @@ map drum hits by similarity (XLN XO, Algonaut Atlas) and find similar sounds
 - **A cart that knows what it is missing.** Gather sounds per song or mood; the cart
   reports its overall feel, key and tempo, flags clashes, and fills an empty slot
   ("+ Hats") with sounds that match the rest of the cart.
-- **Sound families and vendor bridges.** Near-identical versions (tape, saturated, pitched) collapse into one sound, so you see how many distinct sounds you really own (here, about 97,000 of 184,000). Every sound also shows its closest match from a different vendor, or is marked as a signature sound when nothing else you own comes close.
+- **Sound families and vendor bridges.** Near-identical versions (tape, saturated, pitched) collapse into one sound, so you see how many distinct sounds you really own (here, about 97,000 distinct sounds out of 185,000 files). Every sound also shows its closest match from a different vendor, or is marked as a signature sound when nothing else you own comes close.
 - **Your whole library, every type, on one map,** across every pack and vendor you own.
 - **Open methods.** Every measure and threshold is written out in [METHODS.md](METHODS.md).
   It is plain signal math on your own machine: no account, no upload, no subscription.
@@ -120,6 +120,10 @@ you can do with the pieces above; they need those packs to run.
 | `mars_remix/remix_projects.py`: rebuild your songs' drums from Mars, re-timing every chop | Samples From Mars |
 | `stoner_doom/Soundlab_Doom.lua`: six varispeed doom songs | LoudFoundry Stoner Doom Rock pack |
 | `galaxy_demo/make_demo.py`: the vertical video and photos below | ffmpeg, Pillow, sounds of your choice |
+
+## Roadmap
+
+What is next lives in [ROADMAP.md](ROADMAP.md).
 
 ## Methods
 
