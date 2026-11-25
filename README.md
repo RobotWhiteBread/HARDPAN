@@ -17,7 +17,7 @@ thing everything else sits on.
 [![The Sound Galaxy](soundlab/demos/post1_galaxy.png)](soundlab/README.md)
 
 A new way to see and use the sample library you already own. Here, 177 REAPER
-projects use 901 of 181,927 sounds: half of one percent. [`soundlab/`](soundlab/)
+projects use 901 of about 185,000 sounds: half of one percent. [`soundlab/`](soundlab/)
 measures every sample you own (tempo, key, brightness, punch, low end and more),
 shows which ones you actually use, and puts them all on a 3D map you can fly through. Hover to hear a sound, click for its
 closest matches, drop favorites in a cart, find duplicate files and gaps in your
