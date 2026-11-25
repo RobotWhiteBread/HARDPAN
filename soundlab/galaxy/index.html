@@ -22,6 +22,19 @@
   #lens .door { cursor:pointer; padding:2px 4px; border-radius:6px; font-size:12px; }
   #lens .door:hover { background:#1a2230; }
   body.lensOpen #right { max-height:calc(46% - 12px); }
+  #beat { bottom:12px; left:50%; transform:translateX(-50%); width:min(700px, calc(100% - 700px)); min-width:560px; display:none; z-index:6; border-color:#6b4a2f; }
+  body.beatOpen #legend { display:none; }
+  #beat .brow { display:grid; grid-template-columns:66px 150px 26px 26px 1fr; gap:6px; align-items:center; margin:3px 0; font-size:12px; }
+  #beat .brow.focus .bl { color:var(--accent); font-weight:700; }
+  #beat .bl { cursor:pointer; }
+  #beat .bn { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--dim); cursor:pointer; }
+  #beat .cells { display:grid; grid-template-columns:repeat(16, 1fr); gap:2px; }
+  #beat .cells i { height:16px; background:#1a2230; border-radius:3px; cursor:pointer; }
+  #beat .cells i:nth-child(4n+1) { background:#222c3d; }
+  #beat .cells i.on { background:var(--accent); }
+  #beat .cells i.now { outline:1px solid #fff; }
+  #beat .ib { padding:1px 4px; font-size:11px; }
+  #beat .ib.on { color:var(--accent); border-color:var(--accent); }
   #kitbox { bottom:12px; right:364px; width:300px; max-height:45%; overflow:auto; display:none; }
   #cartbox { bottom:36px; left:288px; width:340px; max-height:40%; overflow:auto; display:none; border-color:#2f6b4f; }
   #cartbox h3 { font-size:11px; color:var(--dim); text-transform:uppercase; letter-spacing:.08em; margin:8px 0 2px; }
@@ -136,6 +149,7 @@
   <label class="row">Play on hover <input type="checkbox" id="hoverPlay" checked></label>
   <label class="row">Cart mode: click adds (C) <input type="checkbox" id="cartMode"></label>
   <label class="row">Zoom lens: details as you zoom in <input type="checkbox" id="lensOn" checked></label>
+  <button id="beatBtn" style="width:100%;margin-top:6px">Beat playground (B for box, P for beat)</button>
 
   <h2>Find</h2>
   <input type="text" id="search" placeholder="name or pack, e.g. sp1200 kick">
@@ -251,6 +265,20 @@
   <div class="list" id="kit"></div>
   <div class="btns"><button class="primary" id="saveKit">Save kit</button><button id="clearKit">Clear</button></div>
   <div class="hint">Saves soundlab_kit.txt to Downloads. Then run Soundlab_Kit_Builder.lua in REAPER.</div>
+</div>
+
+<div id="beat" class="panel">
+  <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+    <h1 style="margin:0">BEAT</h1>
+    <button class="primary" id="beatPlay">Play</button>
+    <label style="font-size:12px">BPM <input type="text" id="beatBpm" value="90" style="width:44px"></label>
+    <label style="font-size:12px">Swing <input type="range" id="beatSwing" min="0" max="30" value="8" style="width:70px"></label>
+    <button id="beatRoll">Reroll unlocked</button><button id="beatCart">From cart</button><button id="beatToCart">Kit to cart</button>
+    <button id="beatClose" style="margin-left:auto">Close</button>
+  </div>
+  <div id="beatNote" class="hint" style="margin-top:4px"></div>
+  <div id="beatRows" style="margin-top:6px"></div>
+  <div class="hint">While it plays, every sound you hover or arrow to swaps into its row (kicks into Kick, snares into Snare...; anything else goes to Layer). Click a row name to choose where other sounds land. L locks a row, R rerolls it with a similar sound. Click cells to edit the pattern.</div>
 </div>
 
 <div id="lens" class="panel">
@@ -809,11 +837,13 @@ function pick(cx, cy, radius = 9) {
 // ---------- audio ----------
 const audio = new Audio();
 const pathOf = i => G.dirs[G.d[i]] + G.n[i];
-const urlOf = i => {                                   // Windows C:\... and Mac or Linux /Users/... both become file URLs
+const SERVE = location.protocol.startsWith("http");
+const urlOf = i => {
+  if (SERVE) return "/audio?p=" + encodeURIComponent(pathOf(i));                                   // Windows C:\... and Mac or Linux /Users/... both become file URLs
   const p = pathOf(i).replace(/\\/g, "/");
   return (p.startsWith("/") ? "file://" : "file:///") + encodeURI(p).replace(/#/g, "%23").replace(/\?/g, "%3F");
 };
-function play(i) { audio.pause(); audio.src = urlOf(i); audio.currentTime = 0; audio.play().catch(() => {}); }
+function play(i) { if (typeof beatTake === "function" && beatTake(i)) return; audio.pause(); audio.src = urlOf(i); audio.currentTime = 0; audio.play().catch(() => {}); }
 
 // ---------- waveform ----------
 function drawWave(cv, i, w, h) {
@@ -1367,6 +1397,99 @@ function updateLens(force) {
 }
 $("lensOn").onchange = () => updateLens(true);
 
+// ---------- beat playground: a loop that keeps playing while you swap sounds into it ----------
+let actx = null; const bufs = new Map(), loading = new Map();
+function ctx() { if (!actx) actx = new (window.AudioContext || window.webkitAudioContext)(); if (actx.state === "suspended") actx.resume(); return actx; }
+function load(i) {
+  if (i < 0 || bufs.has(i)) return Promise.resolve(bufs.get(i));
+  if (loading.has(i)) return loading.get(i);
+  const p = fetch(urlOf(i)).then(r => { if (!r.ok) throw new Error(r.status); return r.arrayBuffer(); })
+    .then(b => ctx().decodeAudioData(b)).then(b => { bufs.set(i, b); loading.delete(i); if (bufs.size > 500) bufs.delete(bufs.keys().next().value); return b; })
+    .catch(() => { loading.delete(i); return null; });
+  loading.set(i, p); return p;
+}
+const ROWS = [["kick", "Kick", ["kick"]], ["snare", "Snare", ["snare_clap"]], ["hat", "Hat", ["hat"]], ["perc", "Perc", ["perc"]], ["layer", "Layer", ["loop", "bass", "melodic", "texture", "fx_noise", "other"]]];
+const PATTERN = { kick:[0,7,10], snare:[4,12], hat:[0,2,4,6,8,10,12,14], perc:[15], layer:[0] };
+const beat = { on:false, open:false, step:0, bar:0, next:0, timer:null, focus:-1,
+  rows: ROWS.map(([key, label, types]) => ({ key, label, types, sound:-1, lock:false, last:null, steps: Array.from({ length:16 }, (_, k) => PATTERN[key].includes(k)) })) };
+const rowFor = i => { if (beat.focus >= 0) return beat.rows[beat.focus]; const t = typeName(i); return beat.rows.find(r => r.types.includes(t)) || beat.rows[4]; };
+function loopRate(i) {                             // varispeed a loop to the beat's tempo (half or double time if closer)
+  const b = G.bpm[i]; if (!b) return 1;
+  const bpm = +$("beatBpm").value || 90;
+  return [bpm / b, bpm / (b * 2), bpm * 2 / b].sort((x, y) => Math.abs(Math.log(x)) - Math.abs(Math.log(y)))[0];
+}
+function trig(r, t) {
+  const b = bufs.get(r.sound); if (!b) { load(r.sound); return; }
+  const c = ctx(), src = c.createBufferSource(), g = c.createGain();
+  src.buffer = b; const isLayer = r.key === "layer";
+  if (isLayer && typeName(r.sound) === "loop") src.playbackRate.value = loopRate(r.sound);
+  g.gain.value = isLayer ? 0.7 : r.key === "hat" ? 0.6 : 0.9;
+  src.connect(g).connect(c.destination);
+  if (r.last && (isLayer || r.key === "hat")) { try { r.last.stop(t); } catch (e) {} }   // choke the previous hit
+  src.start(t); r.last = src;
+}
+function tick() {
+  const c = ctx(), bpm = Math.max(40, Math.min(220, +$("beatBpm").value || 90)), spb = 60 / bpm / 4, sw = (+$("beatSwing").value) / 100;
+  while (beat.next < c.currentTime + 0.12) {
+    const s = beat.step % 16;
+    for (const r of beat.rows) {
+      if (r.sound < 0 || !r.steps[s]) continue;
+      if (r.key === "layer" && typeName(r.sound) === "loop") { const bars = Math.max(1, G.bars[r.sound] || 1); if (s !== 0 || beat.bar % bars) continue; }
+      trig(r, beat.next);
+    }
+    const when = beat.next, step = s;
+    setTimeout(() => { if (!beat.on) return; document.querySelectorAll("#beatRows .cells i.now").forEach(x => x.classList.remove("now"));
+      document.querySelectorAll(`#beatRows .cells i:nth-child(${step + 1})`).forEach(x => x.classList.add("now")); }, Math.max(0, (when - c.currentTime) * 1000));
+    beat.next += spb * (s % 2 ? 1 - sw : 1 + sw);
+    beat.step++; if (beat.step % 16 === 0) beat.bar++;
+  }
+}
+function beatStart() { const c = ctx(); beat.rows.forEach(r => load(r.sound)); beat.step = 0; beat.bar = 0; beat.next = c.currentTime + 0.08; beat.on = true; beat.timer = setInterval(tick, 25); $("beatPlay").textContent = "Stop"; }
+function beatStop() { beat.on = false; clearInterval(beat.timer); beat.rows.forEach(r => { try { r.last && r.last.stop(); } catch (e) {} }); $("beatPlay").textContent = "Play"; document.querySelectorAll("#beatRows .cells i.now").forEach(x => x.classList.remove("now")); }
+function pickFor(r, near) {                        // a sound for a row: close to `near` if given, else any of the row's types
+  const ti = r.types.map(tIdx).filter(x => x >= 0), cand = [];
+  for (let i = 0; i < N; i++) if (ti.includes(G.t[i]) && vis[i] >= 0.9 && (!FAM || FAM[i] === i) && i !== near) cand.push(i);
+  if (!cand.length) return -1;
+  if (near >= 0) { const top = cand.map(i => [vibeDist(i, near), i]).sort((a, b) => a[0] - b[0]).slice(0, 12); return top[Math.floor(Math.random() * top.length)][1]; }
+  if (r.key === "layer") { const loops = cand.filter(i => typeName(i) === "loop" && G.bpm[i]); if (loops.length) return loops[Math.floor(Math.random() * loops.length)]; }
+  return cand[Math.floor(Math.random() * cand.length)];
+}
+function setRow(r, i) { if (i < 0) return; r.sound = i; load(i); drawBeat(); }
+function drawBeat() {
+  const box = $("beatRows"); box.innerHTML = "";
+  beat.rows.forEach((r, k) => {
+    const d = document.createElement("div"); d.className = "brow" + (beat.focus === k ? " focus" : "");
+    d.innerHTML = `<span class="bl" title="Send hovered sounds here">${r.label}</span><span class="bn" title="${r.sound >= 0 ? pathOf(r.sound) : ""}">${r.sound >= 0 ? G.n[r.sound] : "(empty: hover a sound)"}</span>`
+      + `<button class="ib${r.lock ? " on" : ""}" title="Lock">L</button><button class="ib" title="Reroll with a similar sound">R</button><div class="cells">${r.steps.map(on => `<i class="${on ? "on" : ""}"></i>`).join("")}</div>`;
+    d.querySelector(".bl").onclick = () => { beat.focus = beat.focus === k ? -1 : k; drawBeat(); };
+    d.querySelector(".bn").onclick = () => { if (r.sound >= 0) { select(r.sound, false); flyTo(r.sound); } };
+    const [lk, rr] = d.querySelectorAll("button");
+    lk.onclick = () => { r.lock = !r.lock; drawBeat(); };
+    rr.onclick = () => setRow(r, pickFor(r, r.sound));
+    d.querySelectorAll(".cells i").forEach((c, s) => c.onclick = () => { r.steps[s] = !r.steps[s]; c.classList.toggle("on", r.steps[s]); });
+    box.appendChild(d);
+  });
+}
+function beatTake(i) {                             // while the beat plays, an auditioned sound swaps into its row
+  if (!beat.open || !beat.on || i < 0) return false;
+  const r = rowFor(i); if (r.lock) return false;
+  r.sound = i; load(i); drawBeat(); return true;
+}
+function openBeat(v) {
+  beat.open = v; $("beat").style.display = v ? "block" : "none"; document.body.classList.toggle("beatOpen", v);
+  if (!v) { beatStop(); return; }
+  if (!SERVE) { $("beatNote").innerHTML = "The beat playground needs the Galaxy's local server. In PowerShell run <b>py soundlab.py serve</b> and use the page it opens."; $("beatRows").innerHTML = ""; return; }
+  $("beatNote").textContent = "";
+  if (beat.rows.every(r => r.sound < 0)) beat.rows.forEach(r => r.sound = pickFor(r, -1));
+  beat.rows.forEach(r => load(r.sound)); drawBeat();
+}
+$("beatBtn").onclick = () => openBeat(!beat.open); $("beatClose").onclick = () => openBeat(false);
+$("beatPlay").onclick = () => { if (!SERVE) return; beat.on ? beatStop() : beatStart(); };
+$("beatRoll").onclick = () => { beat.rows.forEach(r => { if (!r.lock) r.sound = pickFor(r, r.sound >= 0 && Math.random() < 0.5 ? r.sound : -1); load(r.sound); }); drawBeat(); };
+$("beatCart").onclick = () => { for (const r of beat.rows) { if (r.lock) continue; const c = cart.filter(j => r.types.includes(typeName(j))).sort((a, b) => stars.has(pathOf(b)) - stars.has(pathOf(a))); if (c.length) r.sound = c[0]; load(r.sound); } drawBeat(); };
+$("beatToCart").onclick = () => beat.rows.forEach(r => r.sound >= 0 && addToCart(r.sound));
+["beatBpm"].forEach(id => $(id).onchange = () => $(id).blur());
+
 // ---------- mouse ----------
 let down = null, lastHover = -1, hoverT = 0;
 const tipWave = document.createElement("canvas");
@@ -1404,6 +1527,7 @@ addEventListener("keydown", e => {
   if ((e.key === "-" || e.key === "_") && cur >= 0) { refine(false); return; }
   if ((e.key === "f" || e.key === "F") && cur >= 0) { select(shown[cur], false); flyTo(shown[cur]); return; }
   if (e.key === "b" || e.key === "B") { setBoxMode(!boxMode); return; }
+  if (e.key === "p" || e.key === "P") { if (!beat.open) openBeat(true); else if (SERVE) (beat.on ? beatStop() : beatStart()); return; }
   if (e.key === "l" || e.key === "L") { $("shopMin").onclick(); return; }
   if (e.key === "Escape" && $("methods").style.display === "block") { openMethods(false); return; }
   if (e.key === "Escape" && boxMode) { setBoxMode(false); return; }
@@ -1412,6 +1536,7 @@ addEventListener("keydown", e => {
   if (e.key === " ") {                            // space: stop if something is playing, else replay the selected sound
     e.preventDefault();
     if (ptTimer) { stopPlayThrough(); audio.pause(); return; }
+    if (beat.on) { beatStop(); return; }
     if (!audio.paused && !audio.ended) { audio.pause(); audio.currentTime = 0; }
     else if (sel >= 0) play(sel);
   }

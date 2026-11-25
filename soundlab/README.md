@@ -25,6 +25,7 @@ It runs on your own machine, on your own files. Nothing is uploaded.
 | **Analyzer** | Measures every sound: tempo, key, note, brightness, punch, low end, stereo width, noise, attack. Guesses what it is (kick, hat, loop, bass...) and tags its character (dark, lofi, punchy...). Resumable, uses all your CPU cores. |
 | **Sound Galaxy** | Every sample as a point in 3D. Similar sounds form named islands ("lofi dark loops"), each sound type can get its own mini galaxy side by side, or pick your own axes. Hover to hear and see the waveform. Click for a web to the 14 closest sounds. Drift from sound to sound. Match key and tempo. Build a kit around one sound. Find duplicate files and gaps in your collection. |
 | **Used vs owned** | Reads your REAPER projects and lights up the sounds you have actually used. Most producers reach for a tiny slice of what they own; the rest of the map shows what you paid for and never heard. Show only used or never-used sounds, see how much of each type you use, or press "Surprise me" to land on a random island you have never touched and build something from it. Set `project_folders` in soundlab.json if your projects live elsewhere. |
+| **Beat playground** | A 16-step beat (kick, snare, hat, perc and a layer for loops or tones) that keeps playing while you explore: every sound you hover or arrow to swaps into its row, so you hear it in a groove instead of on its own. Loops are varispeeded to the tempo. Lock the rows you like, reroll the rest with similar sounds, fill it from your cart, adjust swing and tempo, and send the kit to your cart. Run `py soundlab.py serve` to use it. |
 | **Find a sound** | A shortlist for when you need something now. Pick what you need (kick, snare, loop...), move a few sliders (dark to bright, short to long, soft to punchy, thin to heavy, tonal to noisy), set a key or tempo, and get the best matches with waveforms. Arrow keys move and play, Enter drops a sound in the cart, + and - mean "more like this" and "less like this" and re-rank the list. Press B and drag a box on the map to list everything inside it. File and folder names from the pack makers back up the audio guesses. |
 | **Cart** | Shift+click, Cart mode (key C) or Enter in the shortlist drops sounds in a cart. Keep a cart per song or mood, star the keepers, and play the whole cart through. The cart tells you how it sounds overall (dark, punchy, lofi...), its key and loop tempo, flags anything that clashes, and shows the slots it is missing: click "+ Hats" to list hats that match the rest of the cart. Save it, then lay it out in REAPER or get a Cart folder for the Media Explorer. |
 | **Kit Builder** (REAPER) | Turns a saved kit into a 32 bar song: intro, verses, hook, outro, in one of four grooves (boom bap, house, electro, half-time), loops stretched to one tempo, a starting mix. |
@@ -86,6 +87,9 @@ python soundlab.py check song.wav        mix report (add --refs myrefs to compar
 python soundlab.py audit                 check your REAPER projects and find alternatives
 python soundlab.py cart                  newest saved cart -> a Cart folder for REAPER's Media Explorer
 ```
+
+`python soundlab.py serve` opens the Galaxy through a small server that only your own computer can reach. It is needed for the beat playground; everything else also works when the page is opened as a file.
+
 
 ## In REAPER
 

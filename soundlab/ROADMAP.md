@@ -13,12 +13,13 @@ What is done, what is next, and ideas being weighed. Suggestions and pull reques
 - Sound families (near-identical versions grouped) and vendor bridges (closest match from another vendor, signature sounds)
 - Axis labels, How this works panel, METHODS.md
 - REAPER scripts: kit builder, cart to project, project upgrade
+- Serve mode and the beat playground: a looping 16-step beat that every auditioned sound swaps into, with locks, rerolls and loops varispeeded to tempo
 
 ## Next
 
 1. A "Mine" color and filter for your own recordings, plus "pack sounds closest to my recording"
-2. Play in time: hover previews on the beat over a chosen tempo or loop, pitched to a key
-3. A 16-step pad grid built from the cart, exported to REAPER as a kit and a MIDI pattern
+2. Pitch auditioned sounds to the beat's key, and export the playground pattern to REAPER as a kit plus MIDI
+3. Weighted "sounds like this" (timbre, pitch, envelope) and drop-a-file search
 4. Send to REAPER: a small REAPER script that drops the selected sound on the selected track at the edit cursor
 5. License badges for packs whose loops are compositions that may need clearance
 6. Used vs owned for Ableton Live (.als) and FL Studio (.flp) projects

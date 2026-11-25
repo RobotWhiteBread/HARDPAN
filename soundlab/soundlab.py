@@ -6,6 +6,8 @@ soundlab: one command for every step.
   python soundlab.py analyze [--test] step 2: measure every sound (resumable; --test does 300)
   python soundlab.py galaxy [--waveforms] [--no-open]
                                       step 3: make the Sound Galaxy data and open it in your browser
+  python soundlab.py serve [--port N] open the Galaxy through a private local server: needed for the
+                                      beat playground and in-time previews (leave the window open)
   python soundlab.py check SONG.wav [--refs FOLDER] [--kick K.wav --bass B.wav]
                                       mix report with a 3D spectrogram
   python soundlab.py audit            check your REAPER projects and find alternatives for every sample
@@ -74,6 +76,8 @@ def main():
         run(os.path.join("galaxy", "make_galaxy.py"))
         if "--no-open" not in rest:
             open_galaxy()
+    elif cmd == "serve":
+        subprocess.run([sys.executable, os.path.join(HERE, "galaxy", "serve.py")] + rest)
     elif cmd == "check":
         run(os.path.join("mixmath", "mix_check.py"), *rest)
     elif cmd == "audit":
