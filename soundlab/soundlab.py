@@ -81,7 +81,10 @@ def main():
         if "--no-open" not in rest:
             open_galaxy()
     elif cmd == "serve":
-        subprocess.run([sys.executable, os.path.join(HERE, "galaxy", "serve.py")] + rest)
+        try:
+            subprocess.run([sys.executable, os.path.join(HERE, "galaxy", "serve.py")] + rest)
+        except KeyboardInterrupt:
+            pass                                   # Ctrl+C stops the server; serve.py already said "Stopped."
     elif cmd == "check":
         run(os.path.join("mixmath", "mix_check.py"), *rest)
     elif cmd == "audit":
