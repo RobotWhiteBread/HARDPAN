@@ -16,6 +16,8 @@ What is done, what is next, and ideas being weighed. Suggestions and pull reques
 - Serve mode and the beat playground: a looping 16-step beat that every auditioned sound swaps into, with locks, rerolls and loops varispeeded to tempo
 - Weighted "sounds like this" sliders, drop-a-file search measured in the browser, Color by vendor for your own recordings
 - Setup wizard: `soundlab.py setup` finds sample and project folders and writes soundlab.json
+- Mix Stage: a song drawn by pan, pitch and depth, with clashes, open spots and library sounds that fit them
+- Mix Stage over time (a stage per section), suggestions heard inside the song, and an own-recordings-first switch
 
 ## Next
 

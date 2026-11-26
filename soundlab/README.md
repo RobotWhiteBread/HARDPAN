@@ -13,7 +13,6 @@ ask for "a dark, short snare in F minor" and audition the shortlist with the
 arrow keys, gather a cart that tells you what it is missing, and build kits and
 songs in REAPER from what you find.
 
-![The Sound Galaxy](demos/post1_galaxy.png)
 
 It runs on your own machine, on your own files. Nothing is uploaded.
 
@@ -28,6 +27,7 @@ It runs on your own machine, on your own files. Nothing is uploaded.
 | **Drop a file** | Drag any audio file onto the page (a phone recording, a sound from a song, a sample you found online) and the Galaxy measures it in your browser, flies to the closest sound you own, and lists the 300 nearest. Nothing is uploaded. |
 | **Weighted "sounds like this"** | Six sliders (tone, punch and attack, low end, length, width, tempo) set what "similar" means: turn tone up and length off to find the same color in a shorter hit. |
 | **Your own recordings** | Add a folder of your recordings as "Mine", then Color by vendor to see where they land among the packs and which pack sounds sit closest to them. |
+| **Mix Stage** | Point it at a REAPER project or a folder of stems from any DAW and it draws the mix as a 3D stage you can fly around: left to right is pan, low to high is pitch, front to back is depth (loud, punchy parts up front, quiet washed-out parts behind), and every part glows with the music while the song plays. A flat 2D view is one click away. It marks where parts clash (for example kick and bass fighting at 97 Hz), finds the open spots, and suggests sounds from your own library that fit each one. Each section (from your REAPER markers) gets its own stage and an over-time grid shows how the space changes. Click a suggestion and it plays inside your song, panned and filtered into the open spot, in time. A switch limits suggestions to your own recordings. `py soundlab.py stage song.rpp` |
 | **Beat playground** | A 16-step beat (kick, snare, hat, perc and a layer for loops or tones) that keeps playing while you explore: every sound you hover or arrow to swaps into its row, so you hear it in a groove instead of on its own. Loops are varispeeded to the tempo. Lock the rows you like, reroll the rest with similar sounds, fill it from your cart, adjust swing and tempo, and send the kit to your cart. Run `py soundlab.py serve` to use it. |
 | **Find a sound** | A shortlist for when you need something now. Pick what you need (kick, snare, loop...), move a few sliders (dark to bright, short to long, soft to punchy, thin to heavy, tonal to noisy), set a key or tempo, and get the best matches with waveforms. Arrow keys move and play, Enter drops a sound in the cart, + and - mean "more like this" and "less like this" and re-rank the list. Press B and drag a box on the map to list everything inside it. File and folder names from the pack makers back up the audio guesses. |
 | **Cart** | Shift+click, Cart mode (key C) or Enter in the shortlist drops sounds in a cart. Keep a cart per song or mood, star the keepers, and play the whole cart through. The cart tells you how it sounds overall (dark, punchy, lofi...), its key and loop tempo, flags anything that clashes, and shows the slots it is missing: click "+ Hats" to list hats that match the rest of the cart. Save it, then lay it out in REAPER or get a Cart folder for the Media Explorer. |
@@ -120,15 +120,13 @@ through `reaper/soundlab_paths.lua`, which setup writes from `soundlab.json`.
 
 ## Examples
 
-`examples/` holds tools built around specific commercial packs. They show what
-you can do with the pieces above; they need those packs to run.
+`examples/` holds tools that build on the pieces above. Public images and videos only ever
+use sounds listed in `public_allow` in your settings: your own recordings, openly licensed
+sets, or packs whose makers have said yes in writing.
 
 | Example | Needs |
 |---|---|
-| `machine_tour/make_kits.py`: eight songs, one per classic drum machine | Samples From Mars machine packs |
-| `mars_remix/remix_projects.py`: rebuild your songs' drums from Mars, re-timing every chop | Samples From Mars |
-| `stoner_doom/Soundlab_Doom.lua`: six varispeed doom songs | LoudFoundry Stoner Doom Rock pack |
-| `galaxy_demo/make_demo.py`: the vertical video and photos below | ffmpeg, Pillow, sounds of your choice |
+| `galaxy_demo/make_demo.py`: demo video and photos | ffmpeg, Pillow, sounds of your choice |
 
 ## Roadmap
 
@@ -147,4 +145,3 @@ usually licensed for making music, not for sharing, so never commit audio.
 The Galaxy and Mix Check pages load [three.js](https://threejs.org/) (MIT) from
 a CDN, so the first open needs internet.
 
-![Islands](demos/post2_islands.png)

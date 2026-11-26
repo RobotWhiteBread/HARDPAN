@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>soundlab Mix Stage</title>
+<style>
+  :root { --bg:#07090d; --panel:#0f141c; --line:#232b38; --text:#dde3ec; --dim:#8794a6; --accent:#7aa2ff; --hot:#ff6b6b; --open:#63e6be; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; display:flex; height:100vh; overflow:hidden; }
+  #wrap { flex:1; position:relative; min-width:0; }
+  canvas { width:100%; height:100%; display:block; }
+  #three { position:absolute; inset:0; display:none; }
+  body.d3 #cv { visibility:hidden; } body.d3 #three { display:block; }
+  #three canvas { width:100%; height:100%; }
+  #lbl3 { position:absolute; inset:0; pointer-events:none; overflow:hidden; display:none; } body.d3 #lbl3 { display:block; }
+  .l3 { position:absolute; transform:translate(-50%,-50%); font-size:12px; white-space:nowrap; text-shadow:0 0 4px #000, 0 0 8px #000; }
+  .l3.ax { color:#6c7889; font-size:11px; } .l3.gp { color:#63e6be; font-weight:600; pointer-events:auto; cursor:pointer; } .l3.cl { color:#ff6b6b; font-weight:600; }
+  #side { width:360px; background:var(--panel); border-left:1px solid var(--line); overflow:auto; padding:14px 16px 40px; }
+  h1 { font-size:18px; margin:0 0 2px; } h2 { font-size:12px; text-transform:uppercase; letter-spacing:.08em; color:var(--dim); margin:18px 0 6px; }
+  .hint { color:var(--dim); font-size:12px; }
+  .row { display:flex; gap:8px; align-items:center; padding:5px 6px; border-radius:6px; cursor:pointer; }
+  .row:hover, .row.on { background:#18202c; }
+  .dot { width:10px; height:10px; border-radius:50%; flex:none; }
+  .num { color:var(--dim); font-variant-numeric:tabular-nums; margin-left:auto; white-space:nowrap; font-size:12px; }
+  .clash { border-left:3px solid var(--hot); padding:4px 8px; margin:6px 0; background:#1a1416; border-radius:0 6px 6px 0; font-size:13px; }
+  .gap { border-left:3px solid var(--open); padding:4px 8px; margin:6px 0; background:#121a18; border-radius:0 6px 6px 0; font-size:13px; }
+  button { background:#1b2533; color:var(--text); border:1px solid var(--line); border-radius:6px; padding:3px 9px; cursor:pointer; font:inherit; font-size:12px; }
+  button:hover { border-color:var(--accent); }
+  #sugg .row { font-size:12px; }
+  #tip { position:absolute; pointer-events:none; background:#000c; border:1px solid var(--line); padding:6px 9px; border-radius:6px; font-size:12px; display:none; max-width:280px; }
+  #opts { position:absolute; right:16px; top:12px; font-size:12px; color:var(--dim); }
+  #opts label { margin-right:12px; cursor:pointer; }
+  #secbar { position:absolute; left:70px; top:10px; display:flex; gap:6px; flex-wrap:wrap; max-width:calc(100% - 420px); }
+  #secbar button.on { border-color:var(--accent); background:#22304a; }
+  #grid { border-collapse:collapse; font-size:11px; width:100%; }
+  #grid td, #grid th { padding:2px 3px; text-align:center; } #grid th { color:var(--dim); font-weight:400; cursor:pointer; }
+  #grid td.n { text-align:left; white-space:nowrap; max-width:120px; overflow:hidden; text-overflow:ellipsis; }
+  #grid td.c { width:26px; height:16px; border-radius:3px; }
+  #player { display:flex; gap:6px; align-items:center; flex-wrap:wrap; margin:6px 0; font-size:12px; }
+  #player input[type=range] { width:90px; }
+  @media (max-width: 760px) { body { flex-direction:column; } #side { width:auto; height:45vh; border-left:none; border-top:1px solid var(--line); } }
+</style>
+</head>
+<body>
+<div id="wrap"><canvas id="cv"></canvas><div id="three"></div><div id="lbl3"></div><div id="tip"></div>
+  <div id="secbar"></div>
+  <div id="opts"><label><input type="checkbox" id="view3d" checked> 3D</label><label><input type="checkbox" id="heat" checked> crowding</label><label><input type="checkbox" id="showClash" checked> clashes</label><label><input type="checkbox" id="showGap" checked> open spots</label></div>
+</div>
+<div id="side">
+  <h1 id="title">Mix Stage</h1>
+  <div class="hint">Left to right is pan. Low to high is pitch. Front to back is depth: loud, punchy parts stand in front, quiet and washed-out parts sit behind. Shaded areas are crowded; green boxes are open spots. In 3D, drag to turn, scroll to zoom, and the parts glow with the music while it plays.</div>
+  <div id="notes" class="hint" style="margin-top:6px"></div>
+  <div id="player"></div>
+  <h2>Parts</h2><div id="parts"></div>
+  <h2>Over time</h2><div class="hint">How loud each part is in each section. Click a column to see that section on the stage.</div><table id="grid"></table>
+  <h2>Clashes</h2><div id="clashes"></div>
+  <h2>Open spots</h2><div id="gaps"></div>
+  <h2 id="suggH" style="display:none">Sounds from your library for this spot</h2>
+  <div id="suggOpts" class="hint" style="display:none"><label><input type="checkbox" id="mineOnly"> only my own sounds</label> <label><input type="checkbox" id="fitSpot" checked> shape it to fit the spot</label></div>
+  <div id="sugg"></div>
+  <h2>How this works</h2>
+  <div class="hint">Each part is measured from its audio: spectrum in 24 bands from 30 Hz to 16 kHz, left and right balance per band, stereo width (side vs mid), level while playing, and how sharp its hits are. Crowding adds every part's energy over the pan and pitch grid, spread by its width. A clash is two parts that play at the same time, sit close in pan, share at least a quarter of their spectrum and are within 12 dB. Open spots are the emptiest areas between 60 Hz and 12 kHz, away from the hard-panned edges. Suggestions come from your Sound Galaxy: sounds whose brightness and width fit the spot. See METHODS.md.</div>
+</div>
+<script src="data/stage_data.js"></script>
+<script>
+const S = window.STAGE, $ = id => document.getElementById(id);
+const SERVE = location.protocol.startsWith("http");
+const cv = $("cv"), cx = cv.getContext("2d");
+let W, H, sel = -1, picked = -1, V = S, secIdx = -1;
+const F0 = 30, F1 = 16000, M = { l: 70, r: 24, t: 52, b: 40 };
+const GI = Object.fromEntries(S.tracks.map((t, i) => [t.name, i]));
+const hue = (name, a = 1) => `hsl(${((GI[name] ?? 0) * 137.5 + 20) % 360} 80% 62% / ${a})`;
+const X = p => M.l + (p + 1) / 2 * (W - M.l - M.r);
+const Y = f => H - M.b - Math.log(Math.max(F0, Math.min(F1, f)) / F0) / Math.log(F1 / F0) * (H - M.t - M.b);
+const lv = S.tracks.map(t => t.db), dbMax = Math.max(...lv), dbMin = Math.min(...lv);
+const near = t => Math.max(0, Math.min(1, (t.db - dbMin) / (dbMax - dbMin + 1e-9)));
+const panTxt = p => Math.abs(p) < 0.08 ? "center" : (p < 0 ? `${Math.round(-p * 100)}% L` : `${Math.round(p * 100)}% R`);
+const hz = f => f >= 1000 ? (f / 1000).toFixed(f >= 10000 ? 0 : 1) + " kHz" : Math.round(f) + " Hz";
+const tm = t => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, "0")}`;
+
+function size() { const r = cv.getBoundingClientRect(), d = devicePixelRatio || 1; W = r.width; H = r.height; cv.width = W * d; cv.height = H * d; cx.setTransform(d, 0, 0, d, 0, 0); draw(); }
+function shapes() {
+  return V.tracks.map((t, i) => ({ i, t, x: X(t.pan), y: Y(t.cent), rx: (0.05 + Math.min(1, t.width) * 0.42) * (W - M.l - M.r) / 2, y0: Y(t.hi), y1: Y(t.lo), n: near(t) }));
+}
+function draw() {
+  cx.clearRect(0, 0, W, H);
+  cx.strokeStyle = "#1b2230"; cx.fillStyle = "#6c7889"; cx.font = "11px system-ui"; cx.lineWidth = 1;
+  for (const f of [50, 100, 250, 500, 1000, 2500, 5000, 10000]) { const y = Y(f); cx.beginPath(); cx.moveTo(M.l, y); cx.lineTo(W - M.r, y); cx.stroke(); cx.fillText(hz(f), 12, y + 4); }
+  for (const [p, l] of [[-1, "L"], [-0.5, ""], [0, "C"], [0.5, ""], [1, "R"]]) { const x = X(p); cx.beginPath(); cx.moveTo(x, M.t); cx.lineTo(x, H - M.b); cx.stroke(); if (l) cx.fillText(l, x - 3, H - M.b + 18); }
+  if ($("heat").checked) {
+    const e = S.edges, nb = V.occ[0].length;
+    for (let b = 0; b < V.occ.length; b++) for (let k = 0; k < nb; k++) {
+      const v = V.occ[b][k]; if (v < 0.02) continue;
+      const p0 = Math.max(-1, -1 + 2 * (k - 0.5) / (nb - 1)), p1 = Math.min(1, -1 + 2 * (k + 0.5) / (nb - 1));
+      cx.fillStyle = `rgba(255,120,90,${Math.min(0.45, v * 0.6)})`;
+      cx.fillRect(X(p0), Y(e[b + 1]), X(p1) - X(p0), Y(e[b]) - Y(e[b + 1]));
+    }
+  }
+  if ($("showGap").checked) V.gaps.forEach((g, k) => {
+    const x0 = X(g.pan0), x1 = X(g.pan1), y0 = Y(g.hi), y1 = Y(g.lo);
+    cx.setLineDash([5, 4]); cx.strokeStyle = k === picked ? "#b2f2bb" : "#63e6be"; cx.lineWidth = k === picked ? 2.5 : 1.5;
+    cx.strokeRect(x0, y0, x1 - x0, y1 - y0); cx.setLineDash([]);
+    cx.fillStyle = "#63e6be"; cx.font = "bold 12px system-ui"; cx.fillText(`open ${k + 1}`, x0 + 4, y0 + 14);
+  });
+  for (const s of shapes().sort((a, b) => a.n - b.n)) {
+    const on = sel < 0 || sel === s.t.name, a = on ? 0.18 + 0.5 * s.n : 0.05;
+    const ry = Math.max(8, (s.y1 - s.y0) / 2), cy = (s.y0 + s.y1) / 2;
+    const g = cx.createRadialGradient(s.x, cy, 2, s.x, cy, Math.max(s.rx, ry));
+    g.addColorStop(0, hue(s.t.name, a + 0.2)); g.addColorStop(1, hue(s.t.name, 0));
+    cx.fillStyle = g; cx.beginPath(); cx.ellipse(s.x, cy, s.rx, ry, 0, 0, 7); cx.fill();
+    cx.strokeStyle = hue(s.t.name, on ? 0.4 + 0.6 * s.n : 0.15); cx.lineWidth = 1 + 2.5 * s.n; cx.stroke();
+    cx.fillStyle = on ? "#fff" : "#fff5"; cx.beginPath(); cx.arc(s.x, s.y, 2 + 4 * s.n, 0, 7); cx.fill();
+    if (on) { cx.font = `${11 + Math.round(4 * s.n)}px system-ui`; cx.fillText(s.t.name.slice(0, 26), s.x + 8, s.y - 6); }
+  }
+  if ($("showClash").checked) {
+    const ss = Object.fromEntries(shapes().map(s => [s.t.name, s]));
+    for (const c of V.clashes) {
+      const a = ss[c.a], b = ss[c.b]; if (!a || !b) continue;
+      const y = Y(c.hz), bx = b.x === a.x ? a.x + 40 : b.x;
+      cx.strokeStyle = "#ff6b6b"; cx.lineWidth = 2; cx.beginPath(); cx.moveTo(a.x, y); cx.lineTo(bx, y); cx.stroke();
+      cx.fillStyle = "#ff6b6b"; cx.beginPath(); cx.arc((a.x + bx) / 2, y, 6, 0, 7); cx.fill();
+      cx.font = "bold 11px system-ui"; cx.fillText(`clash ${hz(c.hz)}`, (a.x + bx) / 2 + 10, y - 8);
+    }
+  }
+  if (playing) { cx.fillStyle = "#7aa2ff"; cx.font = "bold 12px system-ui"; cx.fillText(`▶ ${tm(songPos())}`, W - 90, H - 12); }
+}
+
+// sections
+function setView(k) {
+  secIdx = k; V = k < 0 ? S : S.sections[k]; picked = -1; sel = -1;
+  document.querySelectorAll("#secbar button").forEach(b => b.classList.toggle("on", +b.dataset.k === k));
+  document.querySelectorAll("#grid th[data-k]").forEach(h => h.style.color = +h.dataset.k === k ? "#7aa2ff" : "");
+  panels(); draw(); window.stage3d?.update();
+}
+$("secbar").innerHTML = `<button data-k="-1" class="on">Whole song</button>` + S.sections.map((s, k) => `<button data-k="${k}">${s.name} <span class="hint">${tm(s.t0)}</span></button>`).join("");
+$("secbar").onclick = e => { const b = e.target.closest("button"); if (b) setView(+b.dataset.k); };
+(function grid() {
+  const names = S.tracks.map(t => t.name).sort((a, b) => S.tracks[GI[b]].db - S.tracks[GI[a]].db);
+  let h = `<tr><th></th>${S.sections.map((s, k) => `<th data-k="${k}" title="${s.name}">${k + 1}</th>`).join("")}</tr>`;
+  for (const n of names) {
+    h += `<tr><td class="n">${n}</td>` + S.sections.map(s => { const t = s.tracks.find(x => x.name === n);
+      const a = t ? (0.15 + 0.85 * near(t)) * Math.min(1, t.active * 1.5) : 0;
+      return `<td class="c" style="background:${t ? hue(n, a) : "#151b24"}" title="${s.name}: ${t ? t.db.toFixed(0) + " dB" : "silent"}"></td>`; }).join("") + "</tr>";
+  }
+  $("grid").innerHTML = h;
+  $("grid").onclick = e => { const th = e.target.closest("th[data-k]"); if (th) setView(+th.dataset.k); };
+})();
+
+function panels() {
+  $("title").textContent = "Mix Stage: " + S.song + (secIdx >= 0 ? ` (${V.name}, ${tm(V.t0)} to ${tm(V.t1)})` : "");
+  $("notes").textContent = S.notes.join(". ") + (S.bpm ? `. ${S.bpm} BPM.` : ".");
+  const order = V.tracks.map((t, i) => i).sort((a, b) => V.tracks[b].db - V.tracks[a].db);
+  $("parts").innerHTML = order.map(i => { const t = V.tracks[i];
+    return `<div class="row ${sel === t.name ? "on" : ""}" data-n="${t.name}"><span class="dot" style="background:${hue(t.name)}"></span>${t.name}<span class="num">${t.db.toFixed(0)} dB · ${panTxt(t.pan)} · ${hz(t.lo)}-${hz(t.hi)}</span></div>`; }).join("");
+  $("clashes").innerHTML = V.clashes.length ? V.clashes.map(c => `<div class="clash"><b>${c.a}</b> and <b>${c.b}</b> fight around <b>${hz(c.hz)}</b> (they share ${Math.round(c.overlap * 100)}% of their spectrum and play together ${Math.round(c.together * 100)}% of the time). Try a cut near ${hz(c.hz)} in the quieter one, pan them apart, or sidechain one to the other.</div>`).join("")
+    : `<div class="hint">No strong clashes${secIdx >= 0 ? " in this section" : ""}.</div>`;
+  $("gaps").innerHTML = V.gaps.length ? V.gaps.map((g, k) => `<div class="gap"><b>Open ${k + 1}:</b> ${hz(g.lo)} to ${hz(g.hi)}, ${panTxt((g.pan0 + g.pan1) / 2)}. <button data-k="${k}">Find sounds</button></div>`).join("")
+    : `<div class="hint">The stage is evenly filled.</div>`;
+  $("suggH").style.display = "none"; $("suggOpts").style.display = "none"; $("sugg").innerHTML = "";
+}
+$("parts").onclick = e => { const r = e.target.closest(".row"); if (!r) return; sel = sel === r.dataset.n ? -1 : r.dataset.n; panels(); draw(); };
+$("gaps").onclick = e => { const b = e.target.closest("button"); if (b) suggest(+b.dataset.k); };
+for (const id of ["heat", "showClash", "showGap"]) $(id).onchange = () => { draw(); window.stage3d?.update(); };
+$("view3d").onchange = () => { document.body.classList.toggle("d3", $("view3d").checked); window.stage3d?.resize(); draw(); };
+
+// ---------- the song, with a suggested sound placed in the open spot ----------
+let actx, songBuf, songSrc, playing = false, playT0 = 0, playFrom = 0, cand = null, candTimer = null, candGain, candPan, candHP, candLP;
+const songPos = () => playing ? playFrom + (actx.currentTime - playT0) : playFrom;
+const BEAT = () => 60 / (S.bpm || 120), BAR = () => 4 * BEAT();
+let songAn, candAn;
+function ac() { if (!actx) { actx = new AudioContext(); songAn = actx.createAnalyser(); songAn.fftSize = 2048; songAn.smoothingTimeConstant = 0.6; songAn.connect(actx.destination);
+  candAn = actx.createAnalyser(); candAn.fftSize = 512; candGain = actx.createGain(); candPan = actx.createStereoPanner(); candHP = actx.createBiquadFilter(); candLP = actx.createBiquadFilter();
+  candHP.type = "highpass"; candLP.type = "lowpass"; candHP.connect(candLP); candLP.connect(candPan); candPan.connect(candGain); candGain.connect(candAn); candAn.connect(actx.destination); candGain.gain.value = 0.6; } return actx; }
+async function loadSong() { if (songBuf || !S.mix) return songBuf; const r = await fetch(S.mix); songBuf = await ac().decodeAudioData(await r.arrayBuffer()); return songBuf; }
+async function play(from) {
+  if (!SERVE) { $("player").innerHTML = `<span class="hint">Run py soundlab.py serve and open http://127.0.0.1:8765/stage.html to play the song here.</span>`; return; }
+  await loadSong(); stopSong();
+  songSrc = ac().createBufferSource(); songSrc.buffer = songBuf; songSrc.connect(songAn);
+  playFrom = from ?? (secIdx >= 0 ? V.t0 : 0); playT0 = actx.currentTime + 0.05; songSrc.start(playT0, playFrom); playing = true;
+  songSrc.onended = () => { playing = false; draw(); };
+  if (cand) startCand();
+  tick();
+}
+function stopSong() { if (songSrc) { try { songSrc.stop(); } catch (e) {} songSrc = null; } playing = false; stopCand(false); }
+function tick() { if (!playing) return; draw(); if (secIdx >= 0 && songPos() >= V.t1) { play(V.t0); return; } requestAnimationFrame(tick); }
+function stopCand(clear = true) { clearInterval(candTimer); candTimer = null; if (cand && cand.src) { try { cand.src.stop(); } catch (e) {} cand.src = null; } if (clear) cand = null; }
+function startCand() {
+  if (!cand || !playing) return;
+  clearInterval(candTimer); if (cand.src) { try { cand.src.stop(); } catch (e) {} }
+  const g = V.gaps[cand.k], fit = $("fitSpot").checked;
+  candPan.pan.value = Math.max(-1, Math.min(1, (g.pan0 + g.pan1) / 2));
+  candHP.frequency.value = fit ? g.lo * 0.7 : 10; candLP.frequency.value = fit ? g.hi * 1.4 : 20000;
+  const t = actx.currentTime, songNow = songPos(), nextBar = Math.ceil(songNow / BAR() + 1e-6) * BAR(), at = t + (nextBar - songNow);
+  if (cand.loop) {
+    const s = actx.createBufferSource(); s.buffer = cand.buf; s.loop = true;
+    if (S.bpm && cand.bpm) s.playbackRate.value = S.bpm / cand.bpm;
+    s.connect(candHP); s.start(at); cand.src = s;
+  } else {
+    let next = at; const step = cand.step * BEAT();
+    const fire = () => { while (next < actx.currentTime + 0.3) { const s = actx.createBufferSource(); s.buffer = cand.buf; s.connect(candHP); s.start(next); next += step; } };
+    fire(); candTimer = setInterval(fire, 100);
+  }
+}
+function drawPlayer() {
+  $("player").innerHTML = `<button id="pPlay">${playing ? "Stop" : "Play " + (secIdx >= 0 ? "section" : "song")}</button>` +
+    (cand ? `<span>with <b>${cand.name}</b></span> <label>level <input id="pGain" type="range" min="0" max="1.5" step="0.05" value="${candGain ? candGain.gain.value : 0.6}"></label> <button id="pDrop">Remove</button> <button id="pCopy">Copy path</button>` : `<span class="hint">Pick a sound under an open spot to hear it in the song.</span>`);
+  $("pPlay").onclick = () => { if (playing) { stopSong(); drawPlayer(); draw(); } else play().then(drawPlayer); };
+  if (cand) { $("pGain").oninput = e => candGain.gain.value = +e.target.value; $("pDrop").onclick = () => { stopCand(); drawPlayer(); };
+    $("pCopy").onclick = () => navigator.clipboard?.writeText(cand.path); }
+}
+if (S.mix) drawPlayer();
+
+// ---------- suggestions from the Sound Galaxy ----------
+let G = null;
+function loadGalaxy(cb) {
+  if (G) return cb();
+  $("sugg").innerHTML = `<div class="hint">Loading your library...</div>`;
+  const s = document.createElement("script"); s.src = "data/galaxy_data.js";
+  s.onload = () => { G = window.GALAXY; cb(); };
+  s.onerror = () => { $("sugg").innerHTML = `<div class="hint">Make the Sound Galaxy first (py soundlab.py galaxy).</div>`; };
+  document.head.appendChild(s);
+}
+const rankOf = (k, v) => { const q = (G.featQ || {})[k]; if (!q) return 128; let lo = 0, hi = q.length - 1; while (lo < hi) { const m = (lo + hi) >> 1; if (q[m] < v) lo = m + 1; else hi = m; } return 1 + 254 * lo / (q.length - 1); };
+function isMine(i) { const src = G.packs[G.p[i]].split("|")[0].trim().toLowerCase(); return (G.mine || ["mine"]).map(x => x.toLowerCase()).includes(src); }
+function suggest(k) {
+  picked = k; draw(); window.stage3d?.update();
+  loadGalaxy(() => {
+    const g = V.gaps[k], fc = Math.sqrt(g.lo * g.hi), side = Math.abs((g.pan0 + g.pan1) / 2) > 0.3, mine = $("mineOnly").checked;
+    const tb = rankOf("bright", Math.log(Math.max(fc, 20)));
+    const types = fc < 250 ? ["bass", "melodic", "texture"] : fc < 2500 ? ["melodic", "texture", "loop"] : ["hat", "perc", "texture", "fx_noise", "melodic"];
+    const tset = new Set(types.map(t => G.types.indexOf(t)));
+    const cands = [];
+    for (let i = 0; i < G.count; i++) {
+      if (!tset.has(G.t[i]) || (G.fam && G.fam[i] !== i) || /kick|\bbd\b|snare|clap/i.test(G.n[i])) continue;
+      if (mine && !isMine(i)) continue;
+      const d = Math.abs(G.feats.bright[i] - tb) + (side ? Math.max(0, 150 - G.feats.width[i]) * 0.4 : 0)
+              + (S.bpm && G.bpm[i] && Math.abs(G.bpm[i] - S.bpm) > 3 && Math.abs(G.bpm[i] - 2 * S.bpm) > 3 && Math.abs(2 * G.bpm[i] - S.bpm) > 3 ? 25 : 0);
+      cands.push([d, i]);
+    }
+    cands.sort((a, b) => a[0] - b[0]);
+    const out = [], perPack = {};
+    for (const [d, i] of cands) { const p = G.p[i]; if ((perPack[p] = (perPack[p] || 0) + 1) > 2) continue; out.push(i); if (out.length >= 14) break; }
+    $("suggH").style.display = ""; $("suggOpts").style.display = "";
+    $("sugg").innerHTML = `<div class="hint">For open ${k + 1}${secIdx >= 0 ? " in " + V.name : ""}: ${hz(g.lo)} to ${hz(g.hi)}, ${side ? "wide or off-center" : "near the center"}. ${SERVE ? "Click one to hear it in the song, placed in that spot." : "Run py soundlab.py serve to hear these in the song."}</div>` +
+      (out.length ? out.map(i => `<div class="row" data-i="${i}"><span class="dot" style="background:${isMine(i) ? "#ffd43b" : "#63e6be"}"></span>${G.n[i].replace(/\.[^.]+$/, "").slice(0, 32)}<span class="num">${G.types[G.t[i]].replace("_", " ")}${G.bpm[i] ? " · " + G.bpm[i] : ""}</span></div>`).join("")
+        : `<div class="hint">${mine ? "None of your own sounds fit yet. Add a folder of your recordings with py soundlab.py setup --mine FOLDER." : "Nothing fits."}</div>`);
+  });
+}
+$("mineOnly").onchange = () => picked >= 0 && suggest(picked);
+$("fitSpot").onchange = () => cand && startCand();
+$("sugg").onclick = async e => {
+  const r = e.target.closest(".row"); if (!r || !G) return; const i = +r.dataset.i;
+  const path = G.dirs[G.d[i]] + "\\" + G.n[i];
+  document.querySelectorAll("#sugg .row").forEach(x => x.classList.toggle("on", x === r));
+  if (!SERVE) { navigator.clipboard?.writeText(path); return; }
+  const buf = await ac().decodeAudioData(await (await fetch("/audio?p=" + encodeURIComponent(path))).arrayBuffer());
+  const type = G.types[G.t[i]], isLoop = type === "loop" || (G.bars && G.bars[i] > 0) || buf.duration > 3.5;
+  stopCand(); cand = { k: picked, name: G.n[i].replace(/\.[^.]+$/, ""), path, buf, loop: isLoop, bpm: G.bpm[i] || 0, step: /hat|perc/.test(type) ? 1 : 4 };
+  if (!playing) await play(); else startCand();
+  drawPlayer();
+};
+
+// hover and click on the stage
+cv.onmousemove = e => {
+  const r = cv.getBoundingClientRect(), mx = e.clientX - r.left, my = e.clientY - r.top;
+  let best = null, bd = 1e9;
+  for (const s of shapes()) { const d = Math.hypot(mx - s.x, my - s.y); if (d < bd) { bd = d; best = s; } }
+  const tip = $("tip");
+  if (best && bd < 40) { const t = best.t;
+    tip.innerHTML = `<b>${t.name}</b><br>${t.db.toFixed(1)} dB while playing, ${panTxt(t.pan)}, width ${Math.round(Math.min(1, t.width) * 100)}%<br>${hz(t.lo)} to ${hz(t.hi)}, center ${hz(t.cent)}<br>plays ${Math.round(t.active * 100)}% of ${secIdx >= 0 ? "this section" : "the song"}`;
+    tip.style.display = "block"; tip.style.left = (mx + 14) + "px"; tip.style.top = (my + 10) + "px"; }
+  else tip.style.display = "none";
+};
+cv.onclick = e => { const r = cv.getBoundingClientRect(), mx = e.clientX - r.left, my = e.clientY - r.top;
+  for (let k = 0; k < V.gaps.length; k++) { const g = V.gaps[k]; if (mx > X(g.pan0) && mx < X(g.pan1) && my > Y(g.hi) && my < Y(g.lo)) return suggest(k); } };
+addEventListener("keydown", e => { if (e.code === "Space" && S.mix) { e.preventDefault(); $("pPlay")?.click(); } });
+addEventListener("resize", size); panels(); size();
+document.body.classList.add("d3");
+</script>
+
+<script type="importmap">
+{ "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+               "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/" } }
+</script>
+<script type="module">
+import * as THREE from "three";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+const host = document.getElementById("three"), lbl = document.getElementById("lbl3");
+const R = new THREE.WebGLRenderer({ antialias: true, alpha: true }); R.setPixelRatio(devicePixelRatio || 1); host.appendChild(R.domElement);
+const scene = new THREE.Scene(); scene.fog = new THREE.Fog(0x07090d, 260, 620);
+const cam = new THREE.PerspectiveCamera(48, 1, 1, 2000); cam.position.set(150, 120, 260);
+const ctl = new OrbitControls(cam, R.domElement); ctl.target.set(0, 70, -60); ctl.enableDamping = true; ctl.autoRotate = true; ctl.autoRotateSpeed = 0.35;
+R.domElement.addEventListener("pointerdown", () => ctl.autoRotate = false);
+scene.add(new THREE.AmbientLight(0xffffff, 0.5)); const key = new THREE.PointLight(0xffffff, 1.2, 0, 0); key.position.set(0, 220, 160); scene.add(key);
+// stage space: x pan -1..1 -> -120..120, y log freq -> 0..180, z depth front 40 .. back -160
+const PX = p => p * 120, PY = f => Math.log(Math.max(30, Math.min(16000, f)) / 30) / Math.log(16000 / 30) * 180, PZ = n => 40 - (1 - n) * 200;
+const depthOf = t => Math.max(0, Math.min(1, 0.75 * near(t) + 0.25 * (t.attack ?? 0.5)));
+// floor, walls, ladders
+const grid = new THREE.GridHelper(260, 26, 0x1e2633, 0x141a24); grid.position.set(0, 0, -60); scene.add(grid);
+const wallMat = new THREE.LineBasicMaterial({ color: 0x1b2230 });
+const AX = [];
+for (const f of [50, 100, 250, 500, 1000, 2500, 5000, 10000]) {
+  const y = PY(f); const g = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(-125, y, -165), new THREE.Vector3(125, y, -165)]);
+  scene.add(new THREE.Line(g, wallMat)); AX.push([new THREE.Vector3(-138, y, -165), hz(f)]);
+}
+for (const [p, l] of [[-1, "Left"], [0, "Center"], [1, "Right"]]) AX.push([new THREE.Vector3(PX(p), -8, 50), l]);
+AX.push([new THREE.Vector3(140, -8, 40), "front"], [new THREE.Vector3(140, -8, -160), "back"]);
+const glowTex = (() => { const c = document.createElement("canvas"); c.width = c.height = 64; const g = c.getContext("2d"); const r = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+  r.addColorStop(0, "rgba(255,255,255,1)"); r.addColorStop(0.3, "rgba(255,255,255,.45)"); r.addColorStop(1, "rgba(255,255,255,0)"); g.fillStyle = r; g.fillRect(0, 0, 64, 64); return new THREE.CanvasTexture(c); })();
+// one body per part (from the whole-song list), tweened between sections
+const parts = S.tracks.map(t => {
+  const col = new THREE.Color().setHSL((((GI[t.name] ?? 0) * 137.5 + 20) % 360) / 360, 0.8, 0.62);
+  const mesh = new THREE.Mesh(new THREE.SphereGeometry(1, 32, 20), new THREE.MeshPhongMaterial({ color: col, emissive: col, emissiveIntensity: 0.35, transparent: true, opacity: 0.35, depthWrite: false, shininess: 40 }));
+  const wire = new THREE.Mesh(mesh.geometry, new THREE.MeshBasicMaterial({ color: col, wireframe: true, transparent: true, opacity: 0.06 }));
+  const halo = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: col, transparent: true, opacity: 0.5, depthWrite: false, blending: THREE.AdditiveBlending }));
+  const core = new THREE.Mesh(new THREE.SphereGeometry(2.2, 12, 8), new THREE.MeshBasicMaterial({ color: 0xffffff }));
+  const g = new THREE.Group(); g.add(mesh, wire, halo, core); scene.add(g);
+  const el = document.createElement("div"); el.className = "l3"; el.textContent = t.name.slice(0, 26); el.style.color = "#fff"; lbl.appendChild(el);
+  return { name: t.name, g, mesh, wire, halo, core, el, cur: null, goal: null, lo: t.lo, hi: t.hi, energy: 0 };
+});
+const axEls = AX.map(([v, t]) => { const e = document.createElement("div"); e.className = "l3 ax"; e.textContent = t; lbl.appendChild(e); return [v, e]; });
+let gapObjs = [], clashObjs = [];
+function target(t) {
+  if (!t) return { x: 0, y: 0, z: -60, sx: 0.01, sy: 0.01, sz: 0.01, op: 0 };
+  const y0 = PY(t.lo), y1 = PY(t.hi), n = depthOf(t);
+  return { x: PX(t.pan), y: (y0 + y1) / 2, z: PZ(n), sx: 6 + Math.min(1, t.width) * 52, sy: Math.max(5, (y1 - y0) / 2), sz: 8 + 14 * n, op: 0.18 + 0.35 * near(t) };
+}
+function update() {
+  const by = Object.fromEntries(V.tracks.map(t => [t.name, t]));
+  for (const p of parts) { const t = by[p.name]; p.goal = target(t); p.t = t; if (!p.cur) p.cur = { ...p.goal }; if (t) { p.lo = t.lo; p.hi = t.hi; } }
+  for (const o of gapObjs) { scene.remove(o.box); o.el.remove(); } gapObjs = [];
+  if ($("showGap").checked) V.gaps.forEach((g, k) => {
+    const w = PX(g.pan1) - PX(g.pan0), h = PY(g.hi) - PY(g.lo);
+    const box = new THREE.Mesh(new THREE.BoxGeometry(w, h, 90), new THREE.MeshBasicMaterial({ color: k === picked ? 0xb2f2bb : 0x63e6be, wireframe: true, transparent: true, opacity: k === picked ? 0.8 : 0.35 }));
+    box.position.set((PX(g.pan0) + PX(g.pan1)) / 2, (PY(g.lo) + PY(g.hi)) / 2, -50); box.userData.gap = k; scene.add(box);
+    const el = document.createElement("div"); el.className = "l3 gp"; el.textContent = `open ${k + 1}`; el.onclick = () => suggest(k); lbl.appendChild(el);
+    gapObjs.push({ box, el, k });
+  });
+  for (const o of clashObjs) { scene.remove(o.ring); o.el.remove(); } clashObjs = [];
+  if ($("showClash").checked) for (const c of V.clashes) {
+    const a = by[c.a], b = by[c.b]; if (!a || !b) continue;
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(10, 1.2, 8, 40), new THREE.MeshBasicMaterial({ color: 0xff6b6b, transparent: true, opacity: 0.85 }));
+    ring.position.set((PX(a.pan) + PX(b.pan)) / 2, PY(c.hz), (PZ(depthOf(a)) + PZ(depthOf(b))) / 2); scene.add(ring);
+    const el = document.createElement("div"); el.className = "l3 cl"; el.textContent = `clash ${hz(c.hz)}`; lbl.appendChild(el);
+    clashObjs.push({ ring, el });
+  }
+}
+// the suggested sound, glowing in its open spot
+const candOrb = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: 0xffd43b, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending }));
+candOrb.scale.set(40, 40, 1); scene.add(candOrb);
+// live levels per part from the song analyser
+const fbuf = new Uint8Array(1024), cbuf = new Uint8Array(256);
+function levels() {
+  if (!(typeof songAn !== "undefined" && songAn && playing)) { for (const p of parts) p.energy *= 0.92; return; }
+  songAn.getByteFrequencyData(fbuf); const ny = actx.sampleRate / 2;
+  for (const p of parts) {
+    const a = Math.max(1, Math.floor(p.lo / ny * 1024)), b = Math.min(1023, Math.ceil(p.hi / ny * 1024));
+    let s = 0; for (let k = a; k <= b; k++) s += fbuf[k]; const v = s / ((b - a + 1) * 255);
+    p.energy = Math.max(v, p.energy * 0.85);
+  }
+}
+const ray = new THREE.Raycaster(), mouse = new THREE.Vector2();
+R.domElement.addEventListener("click", e => {
+  const r = R.domElement.getBoundingClientRect(); mouse.set((e.clientX - r.left) / r.width * 2 - 1, -(e.clientY - r.top) / r.height * 2 + 1);
+  ray.setFromCamera(mouse, cam); const hit = ray.intersectObjects(gapObjs.map(o => o.box))[0]; if (hit) suggest(hit.object.userData.gap);
+});
+R.domElement.addEventListener("pointermove", e => {
+  const r = R.domElement.getBoundingClientRect(); mouse.set((e.clientX - r.left) / r.width * 2 - 1, -(e.clientY - r.top) / r.height * 2 + 1);
+  ray.setFromCamera(mouse, cam); const hit = ray.intersectObjects(parts.filter(p => p.t).map(p => p.mesh))[0], tip = $("tip");
+  if (hit) { const t = parts.find(p => p.mesh === hit.object).t;
+    tip.innerHTML = `<b>${t.name}</b><br>${t.db.toFixed(1)} dB while playing, ${panTxt(t.pan)}, width ${Math.round(Math.min(1, t.width) * 100)}%<br>${hz(t.lo)} to ${hz(t.hi)}<br>${depthOf(t) > 0.6 ? "up front" : depthOf(t) > 0.35 ? "middle" : "in the back"}`;
+    tip.style.display = "block"; tip.style.left = (e.clientX - r.left + 14) + "px"; tip.style.top = (e.clientY - r.top + 10) + "px"; }
+  else tip.style.display = "none";
+});
+function place(v, el) {
+  const p = v.clone().project(cam), r = R.domElement.getBoundingClientRect();
+  if (p.z > 1) { el.style.display = "none"; return; } el.style.display = "";
+  el.style.left = ((p.x + 1) / 2 * r.width) + "px"; el.style.top = ((1 - p.y) / 2 * r.height) + "px";
+}
+function resize() { const r = host.getBoundingClientRect(); if (!r.width) return; R.setSize(r.width, r.height, false); cam.aspect = r.width / r.height; cam.updateProjectionMatrix(); }
+addEventListener("resize", resize);
+let t0 = performance.now();
+function loop() {
+  requestAnimationFrame(loop);
+  if (!document.body.classList.contains("d3")) return;
+  const now = performance.now(), dt = Math.min(0.05, (now - t0) / 1000); t0 = now; levels();
+  const pulse = 0.5 + 0.5 * Math.sin(now / 300);
+  for (const p of parts) {
+    const c = p.cur, g = p.goal, k = 1 - Math.pow(0.002, dt);
+    for (const f of ["x", "y", "z", "sx", "sy", "sz", "op"]) c[f] += (g[f] - c[f]) * k;
+    const on = sel < 0 || sel === p.name, boost = 1 + 0.35 * p.energy;
+    p.g.position.set(c.x, c.y, c.z); p.mesh.scale.set(c.sx * boost, c.sy * boost, c.sz * boost); p.wire.scale.copy(p.mesh.scale);
+    p.mesh.material.opacity = (on ? c.op : c.op * 0.25) * (0.75 + 0.6 * p.energy); p.mesh.material.emissiveIntensity = 0.3 + 1.4 * p.energy;
+    p.halo.scale.set(c.sx * 2.6 * boost, c.sy * 2.2 * boost, 1); p.halo.material.opacity = (on ? 0.25 : 0.06) + 0.6 * p.energy * (c.op > 0.05 ? 1 : 0);
+    p.core.visible = c.op > 0.05; p.el.style.opacity = c.op > 0.05 ? (on ? 1 : 0.3) : 0;
+    place(new THREE.Vector3(c.x, c.y + c.sy * boost + 6, c.z), p.el);
+  }
+  for (const o of clashObjs) { o.ring.rotation.y += dt * 1.5; o.ring.scale.setScalar(1 + 0.25 * pulse); place(o.ring.position.clone().add(new THREE.Vector3(0, 16, 0)), o.el); }
+  for (const o of gapObjs) { o.box.material.opacity = (o.k === picked ? 0.6 : 0.25) + 0.2 * pulse; place(o.box.position.clone().add(new THREE.Vector3(0, o.box.geometry.parameters.height / 2 + 8, 0)), o.el); }
+  if (typeof cand !== "undefined" && cand && playing && V.gaps[cand.k]) {
+    const g = V.gaps[cand.k]; candOrb.position.set((PX(g.pan0) + PX(g.pan1)) / 2, (PY(g.lo) + PY(g.hi)) / 2, -50);
+    let e = 0; if (candAn) { candAn.getByteTimeDomainData(cbuf); for (const v of cbuf) e = Math.max(e, Math.abs(v - 128) / 128); }
+    candOrb.material.opacity = 0.35 + 0.65 * Math.min(1, e * 2); candOrb.scale.setScalar(30 + 50 * e);
+  } else candOrb.material.opacity *= 0.9;
+  for (const [v, e] of axEls) place(v, e);
+  ctl.update(); R.render(scene, cam);
+}
+window.stage3d = { update, resize };
+update(); resize(); loop();
+</script>
+</body>
+</html>

@@ -132,7 +132,33 @@ Every `.rpp` file under your project folders (`project_folders` in soundlab.json
 
 Keys match when they are the same, a fifth apart, or relative major and minor. Tempos match within 6%, also at double or half time.
 
-## 3. Limits
+## 3. Mix Stage (mixmath/make_stage.py)
+
+Reads a REAPER project (every unmuted track's audio items, with item and track volume, track pan, loops, play rate and start offset) or a folder of stems, at 22,050 Hz for up to 7 minutes. MIDI and effects are not heard when reading a project; rendered stems give the exact picture.
+
+For each part: a 2048-point STFT with a 1024 hop on left and right; frames within 45 dB of the part's loudest frame count as playing. Energy is summed in 24 log-spaced bands from 30 Hz to 16 kHz. The drawn range is the 10th to 90th percentile of that spectrum and the center is its log-weighted mean. Pan is (right minus left) over (right plus left) energy, per band and overall. Width is the square root of side over mid energy. Level is the mean power of the playing frames in dBFS. Depth on the stage is the level rank: louder parts are drawn bigger and brighter, in front.
+
+Crowding: each part's band energy (scaled by level and by how much of the song it plays) is spread over 9 pan positions with a Gaussian whose spread grows with width, then summed and scaled to the loudest cell.
+
+Clashes: two parts that play together at least 20% of the time, sit within 0.35 in pan (more when both are wide), are within 12 dB of each other and share at least 25% of their spectrum (sum of the band-by-band minimum). The clash frequency is the band where they overlap most.
+
+Open spots: the emptiest 3-band by 2-position windows between about 60 Hz and 12 kHz, away from the hard-panned edges (and, below 300 Hz, only near the center, since low end is usually kept in the middle), up to four, each at most 6% of the busiest cell.
+
+Suggestions: sounds in the Sound Galaxy whose brightness rank is closest to the open spot's center frequency (placed on the library's scale through the stored quantiles) and, for off-center spots, whose width is high. Types follow the range: bass, melodic and texture below 250 Hz; melodic, texture and loops up to 2.5 kHz; hats, percussion, textures, FX and melodic above. Kicks, snares and claps are left out. One sound per family and at most two per pack.
+
+### 3D view
+
+The 3D stage uses the same measures. Pan maps to left and right, the log of frequency to height (the part spans its 10th to 90th percentile range), and depth front to back to 75% level rank plus 25% attack sharpness, so loud, punchy parts stand in front. Width sets each body's left-right size. While the song plays, each part grows and brightens with the energy the song's analyser finds in that part's frequency range; this is a live reading of the whole mix in that range, so parts that share a range glow together. Clashes are red rings at the clash frequency; open spots are green boxes, and a suggested sound is a gold light in its spot that pulses with its own level.
+
+### Sections, preview and your own sounds
+
+Sections come from REAPER markers (region ends are skipped); with no markers, or for a stems folder, the song is cut into 30-second sections. Every part is measured again inside each section, and parts playing less than 5% of a section are left out of it. The over-time grid colors each cell by the part's level and how much of the section it plays.
+
+The preview is a plain sum of the parts, scaled to -1 dBFS peak, saved as OGG at 22,050 Hz. A suggestion plays through a stereo panner set to the open spot's pan and, when "shape it to fit the spot" is on, a high-pass at 0.7 times and a low-pass at 1.4 times the spot's edges. Loops (sounds marked as loops, with bars, or longer than 3.5 seconds) start on the next bar and are rate-matched to the song tempo when both tempos are known; hats and percussion retrigger every beat, other one-shots every bar. Sounds whose tempo does not match the song (or half or double it) are pushed down the list.
+
+"Only my own sounds" keeps sources named in "mine" or "public_allow" in soundlab.json, plus any source named "Mine". The Galaxy's Show menu has the same filter.
+
+## 4. Limits
 
 - Types, keys and tempos are educated guesses. Key detection on drums and noise is unreliable, which is why it is skipped when the spectrum is too flat.
 - Only the first 30 seconds of a long file are measured.

@@ -169,7 +169,7 @@
   <h2>Used vs owned</h2>
   <div class="note" id="useStats"></div>
   <div id="useTypes"></div>
-  <label class="row">Show <select id="useFilter"><option value="">everything</option><option value="used">only sounds I've used</option><option value="unused">only sounds I've never used</option></select></label>
+  <label class="row">Show <select id="useFilter"><option value="">everything</option><option value="used">only sounds I've used</option><option value="unused">only sounds I've never used</option><option value="mine">only my own recordings</option></select></label>
   <div class="btns"><button id="useColor">Light up what I use</button><button id="roulette">Surprise me: an unused island</button></div>
   <div class="note" id="rouletteNote"></div>
 
@@ -677,6 +677,7 @@ function drawIslandList() {
 
 const srcNames = [...new Set(G.packs.map(p => p.split("|")[0].trim()))];
 const srcOf = G.packs.map(p => srcNames.indexOf(p.split("|")[0].trim()));
+const mineSrc = new Set(srcNames.map((n, k) => (G.mine || ["Mine"]).map(x => x.toLowerCase()).includes(n.toLowerCase()) ? k : -1).filter(k => k >= 0));
 function hsl(h, s, l) { return new THREE.Color().setHSL(h, s, l); }
 function colorize() {
   const mode = $("colorBy").value, tc = G.types.map(t => new THREE.Color(TYPE_COLOR[t] || "#888"));
@@ -727,7 +728,8 @@ function applyFilter() {
     if (v && one && G.dup[i] >= 0 && dupFirst.get(G.dup[i]) !== i) v = 0;
     if (v && famCollapse && FAM[i] !== i) v = 0;
     if (v && pf >= 0 && G.p[i] !== pf) v = 0;
-    if (v && uf && (uf === "used") !== (useCount[i] > 0)) v = 0;
+    if (v && uf === "mine" && !mineSrc.has(srcOf[G.p[i]])) v = 0;
+    else if (v && uf && uf !== "mine" && (uf === "used") !== (useCount[i] > 0)) v = 0;
     if (v && kf >= 0 && G.key[i] !== kf) v = 0;
     if (v && tempoOn && !(G.bpm[i] >= lo && G.bpm[i] <= hi)) v = 0;
     if (v && q.length) {

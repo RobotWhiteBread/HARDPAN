@@ -10,6 +10,9 @@ soundlab: one command for every step.
                                       step 3: make the Sound Galaxy data and open it in your browser
   python soundlab.py serve [--port N] open the Galaxy through a private local server: needed for the
                                       beat playground and in-time previews (leave the window open)
+  python soundlab.py stage SONG.rpp | STEMS_FOLDER
+                                      Mix Stage: where every part sits (pan, pitch, depth), clashes,
+                                      open spots, and sounds from your library that fit them
   python soundlab.py check SONG.wav [--refs FOLDER] [--kick K.wav --bass B.wav]
                                       mix report with a 3D spectrogram
   python soundlab.py audit            check your REAPER projects and find alternatives for every sample
@@ -85,6 +88,8 @@ def main():
             subprocess.run([sys.executable, os.path.join(HERE, "galaxy", "serve.py")] + rest)
         except KeyboardInterrupt:
             pass                                   # Ctrl+C stops the server; serve.py already said "Stopped."
+    elif cmd == "stage":
+        run(os.path.join("mixmath", "make_stage.py"), *rest)
     elif cmd == "check":
         run(os.path.join("mixmath", "mix_check.py"), *rest)
     elif cmd == "audit":

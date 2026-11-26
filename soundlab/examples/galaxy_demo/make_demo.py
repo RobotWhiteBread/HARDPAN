@@ -1,5 +1,5 @@
 """
-EXAMPLE: Sound Galaxy demo maker (edit PARTS below to point at sounds you own): a beat built from the library, a vertical
+EXAMPLE: Sound Galaxy demo maker (edit PARTS below to point at sounds you may share publicly): a beat built from the library, a vertical
 Reel where every sound lights up its spot in the Galaxy as it plays, and
 square-ish photo posts.
 
@@ -31,16 +31,13 @@ FONT_R = os.environ.get("HP_FONT_R", r"C:\Windows\Fonts\segoeui.ttf")
 TYPE_COLOR = {"kick": "#ff5a4e", "snare_clap": "#ffb347", "hat": "#fff27a", "perc": "#c58bff", "bass": "#4ea8ff",
               "melodic": "#4ef0b0", "loop": "#ff7bd5", "texture": "#8fa3b8", "fx_noise": "#7ee0ff", "other": "#666666"}
 
-STEMS = S + r"\drumbroker\Tamuz - Electric Soul Vol. 2\Tamuz - Electric Soul Vol. 2\Compositions\91 BPM Am Smoker\stems" + "\\"
-SP = S + r"\mars\sp1200_from_mars\SP1200 From Mars\WAV\Drums\Individual Hits\Custom Drums" + "\\"
-PARTS = {
-    "rhodes": (STEMS + "  Rhodes.wav", -5.0),
-    "bass": (STEMS + "  Piano Bass.wav", -4.0),
-    "nylon": (STEMS + "  nylon guitar 1.wav", -11.0),
-    "kick": (SP + r"1. Kick\Kick_Heavy_SP1200_01.wav", -2.0),
-    "snare": (SP + r"2. Snare\Snare_707_SP1200_03.wav", -4.0),
-    "hat": (SP + r"4. CH\CH_808_SP1200_02.wav", -13.0),
-    "vinyl": (S + r"\boombap\vinyl_crackle.wav", -24.0),
+# Public images and videos only show sounds from sources listed in "public_allow" in soundlab.json:
+# your own recordings (for example "Mine"), openly licensed sets, or vendors that said yes in writing.
+# Everything else is left out, names and sounds alike. An empty list means nothing from any vendor.
+PUBLIC_ALLOW = [x.lower() for x in _cfg.get("public_allow", [])]
+PARTS = {   # point these at sounds you may share publicly (your own recordings, CC0 sets), for example:
+    # "kick": (r"D:\Recordings\kick.wav", -2.0),
+    # "rhodes": (r"D:\Recordings\rhodes_Am_91.wav", -5.0),
 }
 
 
@@ -139,6 +136,18 @@ def make_audio():
 def load_galaxy():
     s = open(os.path.join(GAL, "galaxy_data.js"), encoding="utf-8").read()
     G = json.loads(s[s.index("{"): s.rindex("}") + 1])
+    if True:                                        # keep only sources cleared for public use
+        src = [p.split("|")[0].strip().lower() for p in G["packs"]]
+        keep = [i for i, p in enumerate(G["p"]) if src[p] in PUBLIC_ALLOW]
+        for k in ("t", "p", "d", "n", "cl", "sx", "sy", "sz"):
+            G[k] = [G[k][i] for i in keep]
+        counts = np.bincount(np.array(G["cl"]), minlength=len(G["clusters"]))
+        for i, c in enumerate(G["clusters"]):
+            c["n"] = int(counts[i])
+        G["count"] = len(keep)
+        print(f"public images: {len(keep):,} sounds from {', '.join(PUBLIC_ALLOW) or 'no sources'} (set public_allow in soundlab.json)")
+        if not keep:
+            raise SystemExit("Nothing is cleared for public images yet. Add your own folder (or a vendor that said yes) to public_allow.")
     P = np.stack([np.array(G["sx"]), np.array(G["sy"]), np.array(G["sz"])], axis=1) / 10.0
     pal = {t: np.array([int(TYPE_COLOR.get(t, "#888888")[i:i + 2], 16) for i in (1, 3, 5)]) / 255 for t in G["types"]}
     C = np.stack([pal[G["types"][t]] for t in G["t"]])
@@ -338,15 +347,18 @@ def make_photos():
         for line in open(local_g(tsv), encoding="utf-8"):
             p, _, h = line.rstrip("\n").partition("\t")
             th[p] = h
-    ev = json.load(open(os.path.join(OUT, "demo_events.json")))
+    evf = os.path.join(OUT, "demo_events.json")
+    ev = json.load(open(evf)) if os.path.exists(evf) else {"parts": {}}
+    if not PARTS or any(k not in PARTS for k in ev["parts"]):
+        ev = {"parts": {}}                          # an old beat made from other sounds: skip the kit card
     im = Image.new("RGB", (PW, PH), (9, 11, 16))
     d = ImageDraw.Draw(im, "RGBA")
     d.text((70, 80), "One beat,", font=font(66), fill="white")
     d.text((70, 158), "picked from the map.", font=font(66), fill="white")
     d.text((70, 250), "91 BPM in A minor. Drums from an SP-1200 pack,", font=font(30, False), fill=(160, 170, 185))
     d.text((70, 292), "keys and bass from a soul composition.", font=font(30, False), fill=(160, 170, 185))
-    rows = [("kick", "Kick", "kick"), ("snare", "Snare", "snare_clap"), ("hat", "Closed hat", "hat"),
-            ("rhodes", "Rhodes", "melodic"), ("bass", "Piano bass", "bass"), ("nylon", "Nylon guitar", "melodic")]
+    rows = [r for r in [("kick", "Kick", "kick"), ("snare", "Snare", "snare_clap"), ("hat", "Closed hat", "hat"),
+            ("rhodes", "Rhodes", "melodic"), ("bass", "Piano bass", "bass"), ("nylon", "Nylon guitar", "melodic")] if r[0] in ev["parts"]]
     yy = 400
     for key, name, t in rows:
         p = ev["parts"][key]
@@ -363,7 +375,8 @@ def make_photos():
                 bh = max(3, v * 90)
                 d.rounded_rectangle([bx + k_ * bw, yy + 65 - bh / 2, bx + k_ * bw + bw - 4, yy + 65 + bh / 2], 3, fill=col)
         yy += 150
-    im.save(os.path.join(OUT, "post3_kit.png"))
+    if rows:
+        im.save(os.path.join(OUT, "post3_kit.png"))
 
     im = Image.new("RGB", (PW, PH), (9, 11, 16))
     d = ImageDraw.Draw(im, "RGBA")

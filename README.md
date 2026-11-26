@@ -14,7 +14,6 @@ thing everything else sits on.
 
 ## soundlab: your sample library on one 3D map
 
-[![The Sound Galaxy](soundlab/demos/post1_galaxy.png)](soundlab/README.md)
 
 A new way to see and use the sample library you already own. Here, 177 REAPER
 projects use 901 of about 185,000 sounds: half of one percent. [`soundlab/`](soundlab/)

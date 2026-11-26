@@ -380,6 +380,7 @@ def main():
         "count": len(rows), "types": type_names, "packs": pack_names, "dirs": inv(dirs),
         "notes": inv(notes), "chars": char_names, "keys": KEYS,
         "featLabels": {k: l for k, l, _ in FEATS}, "feats": shown, "tieBands": bands, "featQ": featQ,
+        "mine": sorted(set(["Mine"] + list(cfg.get("public_allow", [])) + list(cfg.get("mine", [])))),
         "tieBreak": {k: [G_, w] for k, (G_, _, w) in TIEBREAK.items()}, **out,
         "projects": proj_names, "projectsScanned": n_proj, "use": use,
         "fam": fam, "br": bnear.tolist(),
