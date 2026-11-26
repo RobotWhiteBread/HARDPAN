@@ -14,17 +14,19 @@ thing everything else sits on.
 
 ## soundlab: your sample library on one 3D map
 
-
 A new way to see and use the sample library you already own. Here, 177 REAPER
 projects use 901 of about 185,000 sounds: half of one percent. [`soundlab/`](soundlab/)
 measures every sample you own (tempo, key, brightness, punch, low end and more),
-shows which ones you actually use, and puts them all on a 3D map you can fly through. Hover to hear a sound, click for its
-closest matches, drop favorites in a cart, find duplicate files and gaps in your
-collection, ask for "a dark, short snare in F minor" and audition a shortlist
-with the arrow keys, and save carts as plain folders for any DAW. REAPER users
-get extra scripts to build kits and songs from what they find. It runs on
-your own machine (Windows, Mac or Linux) and never uploads anything. The
-[soundlab README](soundlab/README.md) has a five minute quick start.
+shows which ones you actually use, and puts them all on a 3D map you can fly through.
+
+- **Sound Galaxy:** hover to hear a sound, click for its closest matches, find near-identical copies across packs, ask for "a dark, short snare in F minor" and audition a shortlist with the arrow keys.
+- **Drop a file:** drag any recording onto the map to find what you own that sounds closest to it.
+- **Beat playground:** every sound you audition swaps into a looping beat, so you hear it in a groove.
+- **Mix Stage:** your song as a 3D stage (pan, pitch, depth) that glows as it plays, with clashes marked, open spots found, and sounds from your own library that fit each spot, heard right inside the song.
+- **Carts and kits:** save picks as plain folders for any DAW; REAPER users get scripts that build kits and songs.
+
+It runs on your own machine (Windows, Mac or Linux) and never uploads anything.
+The [soundlab README](soundlab/README.md) has a five minute quick start.
 
 ## Sound target
 Dark and hard-driving, with an 80s edge. On one side, the eerie, ominous
