@@ -48,6 +48,7 @@
   <div id="opts"><label><input type="checkbox" id="view3d" checked> 3D</label><label><input type="checkbox" id="heat" checked> crowding</label><label><input type="checkbox" id="showClash" checked> clashes</label><label><input type="checkbox" id="showGap" checked> open spots</label></div>
 </div>
 <div id="side">
+  <div id="hpNav" style="margin-bottom:10px"></div>
   <h1 id="title">Mix Stage</h1>
   <div class="hint">Left to right is pan. Low to high is pitch. Front to back is depth: loud, punchy parts stand in front, quiet and washed-out parts sit behind. Shaded areas are crowded; green boxes are open spots. In 3D, drag to turn, scroll to zoom, and the parts glow with the music while it plays.</div>
   <div id="notes" class="hint" style="margin-top:6px"></div>
@@ -62,9 +63,12 @@
   <h2>How this works</h2>
   <div class="hint">Each part is measured from its audio: spectrum in 24 bands from 30 Hz to 16 kHz, left and right balance per band, stereo width (side vs mid), level while playing, and how sharp its hits are. Crowding adds every part's energy over the pan and pitch grid, spread by its width. A clash is two parts that play at the same time, sit close in pan, share at least a quarter of their spectrum and are within 12 dB. Open spots are the emptiest areas between 60 Hz and 12 kHz, away from the hard-panned edges. Suggestions come from your Sound Galaxy: sounds whose brightness and width fit the spot. See METHODS.md.</div>
 </div>
-<script src="data/stage_data.js"></script>
+<script>(function () { const s = new URLSearchParams(location.search).get("s");
+  document.write('<script src="data/' + (s && /^[a-z0-9_]+$/.test(s) ? "stages/" + s + ".js" : "stage_data.js") + '"><\/script>'); })();</script>
+<script src="toolbar.js"></script>
 <script>
 const S = window.STAGE, $ = id => document.getElementById(id);
+if (!S) { $("title").textContent = "No Mix Stage yet"; $("notes").innerHTML = "In PowerShell run <b>py soundlab.py stage song.rpp</b> (or a folder of stems). Every song you stage is listed under Mixes in the tool bar."; throw new Error("no stage data"); }
 const SERVE = location.protocol.startsWith("http");
 const cv = $("cv"), cx = cv.getContext("2d");
 let W, H, sel = -1, picked = -1, V = S, secIdx = -1;

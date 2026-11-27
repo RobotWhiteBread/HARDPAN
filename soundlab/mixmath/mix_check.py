@@ -238,6 +238,18 @@ def main():
     out = a.out or os.path.join(base, os.path.splitext(os.path.basename(a.file))[0] + "_mixcheck.html")
     with open(out, "w", encoding="utf-8") as fh:
         fh.write(html)
+    try:                                        # a copy next to the Galaxy so the Mixes menu on every page can open it
+        import mix_index
+        sl = mix_index.slug(os.path.splitext(os.path.basename(a.file))[0])
+        cdir = os.path.join(mix_index.DATA, "checks")
+        os.makedirs(cdir, exist_ok=True)
+        with open(os.path.join(cdir, sl + ".html"), "w", encoding="utf-8") as fh:
+            fh.write(html.replace("</body>", '<script src="../../toolbar.js"></script>\n</body>', 1))
+        flags = sum(1 for c in data["checks"] if c[2] != "good")
+        mix_index.register("check", os.path.basename(a.file), "data/checks/" + sl + ".html",
+                           f"{flags} to look at" if flags else "all good")
+    except Exception as e:
+        print("  (could not add it to the Mixes menu:", e, ")")
     for name, val, state, _ in data["checks"]:
         print(f"  {name:28s} {val:>14s}   {state}")
     print("Report:", out)

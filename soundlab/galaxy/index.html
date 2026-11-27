@@ -158,6 +158,7 @@
   <button id="voiceBtn" style="width:100%;margin-top:6px" onclick="location.href='voice.html'">Voice pads (beatbox and hum into your sounds)</button>
 
   <h2>Find</h2>
+  <button id="mouthBtn" style="width:100%;margin-bottom:6px" title="Records 2 seconds from your mic and finds the closest sounds you own">Search by mouth: beatbox or hum for 2 seconds</button>
   <input type="text" id="search" placeholder="name or pack, e.g. sp1200 kick">
   <label class="row" style="margin-top:6px">Pack <select id="packFilter"><option value="">all packs</option></select></label>
   <label class="row">Key <select id="keyFilter"><option value="">any</option></select></label>
@@ -200,6 +201,7 @@
     <button id="matchBtn">Match key and tempo</button>
     <button id="fillBtn">Build a kit around this</button>
     <button id="copyBtn">Copy path</button>
+    <button id="padBtn" title="Put this sound on the matching Voice Pads pad">Send to Voice Pads</button>
   </div>
   <div id="fillBox" style="display:none">
     <h2>Suggested kit</h2>
@@ -281,7 +283,7 @@
     <button class="primary" id="beatPlay">Play</button>
     <label style="font-size:12px">BPM <input type="text" id="beatBpm" value="90" style="width:44px"></label>
     <label style="font-size:12px">Swing <input type="range" id="beatSwing" min="0" max="30" value="8" style="width:70px"></label>
-    <button id="beatRoll">Reroll unlocked</button><button id="beatCart">From cart</button><button id="beatToCart">Kit to cart</button>
+    <button id="beatRoll">Reroll unlocked</button><button id="beatCart">From cart</button><button id="beatToCart">Kit to cart</button><button id="beatVoice" title="Open this beat in Voice Pads to beatbox or hum on top, then export MIDI">To Voice Pads</button>
     <button id="beatClose" style="margin-left:auto">Close</button>
   </div>
   <div id="beatNote" class="hint" style="margin-top:4px"></div>
@@ -312,6 +314,7 @@
 
 <script src="data/galaxy_data.js"></script>
 <script src="data/galaxy_thumbs.js" onerror="window.THUMBS=null"></script>
+<script src="toolbar.js"></script>
 <script type="importmap">
 { "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/" } }
@@ -954,6 +957,11 @@ function select(i, autoplay = true) {
 }
 $("sameType").onchange = () => sel >= 0 && select(sel, false);
 $("playBtn").onclick = () => sel >= 0 && play(sel);
+$("padBtn").onclick = () => {
+  if (sel < 0) return;
+  try { localStorage.setItem("soundlab_voice_inbox", JSON.stringify({ path: pathOf(sel), type: typeName(sel), at: Date.now() })); } catch (e) {}
+  $("status").textContent = `Sent ${G.n[sel]} to Voice Pads: it lands on the matching pad when Voice Pads is open or next opens.`;
+};
 $("copyBtn").onclick = () => { if (sel < 0) return; const t = document.createElement("textarea"); t.value = pathOf(sel); document.body.appendChild(t); t.select(); document.execCommand("copy"); t.remove(); $("copyBtn").textContent = "Copied"; setTimeout(() => $("copyBtn").textContent = "Copy path", 1200); };
 $("matchBtn").onclick = () => { matchOn = !matchOn; $("matchBtn").classList.toggle("on", matchOn); applyFilter(); };
 let fly = null;
@@ -1511,6 +1519,11 @@ $("beatBtn").onclick = () => openBeat(!beat.open); $("beatClose").onclick = () =
 $("beatPlay").onclick = () => { if (!SERVE) return; beat.on ? beatStop() : beatStart(); };
 $("beatRoll").onclick = () => { beat.rows.forEach(r => { if (!r.lock) r.sound = pickFor(r, r.sound >= 0 && Math.random() < 0.5 ? r.sound : -1); load(r.sound); }); drawBeat(); };
 $("beatCart").onclick = () => { for (const r of beat.rows) { if (r.lock) continue; const c = cart.filter(j => r.types.includes(typeName(j))).sort((a, b) => stars.has(pathOf(b)) - stars.has(pathOf(a))); if (c.length) r.sound = c[0]; load(r.sound); } drawBeat(); };
+$("beatVoice").onclick = () => {
+  try { localStorage.setItem("soundlab_beat_handoff", JSON.stringify({ bpm: +$("beatBpm").value || 90, swing: +$("beatSwing").value,
+    rows: beat.rows.map(r => ({ key: r.key, path: r.sound >= 0 ? pathOf(r.sound) : "", steps: r.steps })), at: Date.now() })); } catch (e) {}
+  beatStop(); location.href = "voice.html?from=beat";
+};
 $("beatToCart").onclick = () => beat.rows.forEach(r => r.sound >= 0 && addToCart(r.sound));
 ["beatBpm"].forEach(id => $(id).onchange = () => $(id).blur());
 
@@ -1559,17 +1572,44 @@ async function dropSearch(file) {
   if (!G.featQ) { $("status").textContent = "Rebuild the Galaxy (py soundlab.py galaxy) to enable drop-a-file search."; return; }
   $("status").textContent = `Measuring ${file.name}...`;
   let ab; try { ab = await ctx().decodeAudioData(await file.arrayBuffer()); } catch (e) { $("status").textContent = `Couldn't read ${file.name} as audio.`; return; }
+  searchAB(ab, `your file "${file.name}"`, URL.createObjectURL(file));
+}
+function searchAB(ab, label, playUrl) {
   const m = measure(ab), r = Object.fromEntries(vibeKeys.map(k => [k, toRank(k, m[k])]));
   const sc = [];
   for (let j = 0; j < N; j++) { if (vis[j] < 0.9 || (FAM && FAM[j] !== j)) continue; let d = 0; for (const k of vibeKeys) { const x = r[k] - G.feats[k][j]; d += featW(k) * x * x; } sc.push([d, j]); }
   sc.sort((a, b) => a[0] - b[0]); const top = sc.slice(0, 300);
   if (!top.length) return;
   const words = vibeKeys.map(k => r[k] < 80 ? (WORD[k] || ["", ""])[0] : r[k] > 175 ? (WORD[k] || ["", ""])[1] : "").filter(Boolean).join(", ") || "middle of the road";
-  listFrom(top.map(x => x[1]), `Closest to your file "${file.name}" (measured as ${words}, ${Math.round(m._c)} Hz centroid, ${m._dur.toFixed(2)} s)`, top.map(x => x[0]));
+  listFrom(top.map(x => x[1]), `Closest to ${label} (measured as ${words}, ${Math.round(m._c)} Hz centroid, ${m._dur.toFixed(2)} s)`, top.map(x => x[0]));
   const best = top[0][1]; const p = new THREE.Vector3(pos[best*3], pos[best*3+1], pos[best*3+2]);
   dropMark.position.set(p.x, p.y + 6, p.z); dropMark.visible = true; fly = { from: controls.target.clone(), to: p, t: 0 }; controls.autoRotate = false;
-  const a = new Audio(URL.createObjectURL(file)); a.play().catch(() => {});
+  if (playUrl) { const a = new Audio(playUrl); a.play().catch(() => {}); }
 }
+// ---------- search by mouth: 2 seconds from the mic, trimmed to the sound, then the same search as a dropped file ----------
+function trimAB(ab) {
+  const d = ab.getChannelData(0), sr = ab.sampleRate; let pk = 0; for (const v of d) pk = Math.max(pk, Math.abs(v));
+  if (pk < 0.003) return null;
+  let a = 0, b = d.length - 1; while (a < b && Math.abs(d[a]) < pk * 0.08) a++; while (b > a && Math.abs(d[b]) < pk * 0.08) b--;
+  a = Math.max(0, a - Math.round(sr * 0.01)); b = Math.min(d.length, b + Math.round(sr * 0.03));
+  const out = ctx().createBuffer(1, Math.max(256, b - a), sr); out.getChannelData(0).set(d.subarray(a, b)); return out;
+}
+async function mouthSearch() {
+  if (!G.featQ) { $("status").textContent = "Rebuild the Galaxy (py soundlab.py galaxy) to enable search by mouth."; return; }
+  let stream; try { stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } }); }
+  catch (e) { $("status").textContent = "Couldn't open the microphone. Allow mic access, and use py soundlab.py serve if the page was opened as a file."; return; }
+  const rec = new MediaRecorder(stream), parts = []; rec.ondataavailable = e => parts.push(e.data);
+  const done = new Promise(r => rec.onstop = r); rec.start(); $("mouthBtn").classList.add("on");
+  let left = 2; $("status").textContent = "Listening... make the sound now (2)";
+  const iv = setInterval(() => { left--; if (left > 0) $("status").textContent = `Listening... (${left})`; }, 1000);
+  await new Promise(r => setTimeout(r, 2000)); clearInterval(iv); rec.stop(); await done;
+  stream.getTracks().forEach(t => t.stop()); $("mouthBtn").classList.remove("on");
+  const blob = new Blob(parts, { type: rec.mimeType });
+  let ab; try { ab = await ctx().decodeAudioData(await blob.arrayBuffer()); } catch (e) { $("status").textContent = "Couldn't read the recording."; return; }
+  const t = trimAB(ab); if (!t) { $("status").textContent = "That was too quiet. Get closer to the mic and try again."; return; }
+  searchAB(t, "your voice", URL.createObjectURL(blob));
+}
+$("mouthBtn").onclick = mouthSearch;
 let dragDepth = 0;
 addEventListener("dragenter", e => { if ([...(e.dataTransfer?.types || [])].includes("Files")) { dragDepth++; document.body.classList.add("dragging"); } });
 addEventListener("dragleave", () => { if (--dragDepth <= 0) { dragDepth = 0; document.body.classList.remove("dragging"); } });

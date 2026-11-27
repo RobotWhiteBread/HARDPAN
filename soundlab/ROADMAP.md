@@ -19,10 +19,11 @@ What is done, what is next, and ideas being weighed. Suggestions and pull reques
 - Mix Stage: a song drawn by pan, pitch and depth, with clashes, open spots and library sounds that fit them
 - Mix Stage over time (a stage per section), suggestions heard inside the song, and an own-recordings-first switch
 - Voice Pads: beatbox and hum into the mic to play your own samples and a synth, match your mouth sounds to the library, record loops and export MIDI
+- One tool bar on every page with a Mixes menu of staged songs and Mix Check reports; search the Galaxy by mouth; sounds, carts and beat playground patterns move between the Galaxy and Voice Pads
 
 ## Next
 
-1. Pitch auditioned sounds to the beat's key, and export the playground pattern to REAPER as a kit plus MIDI
+1. Pitch auditioned sounds to the beat's key
 2. Send to REAPER: a small REAPER script that drops the selected sound on the selected track at the edit cursor
 3. Better instrument tags (which instrument, not only which drum role)
 4. License badges for packs whose loops are compositions that may need clearance

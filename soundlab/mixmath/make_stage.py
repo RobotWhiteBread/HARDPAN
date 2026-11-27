@@ -306,15 +306,22 @@ def main():
             "sections": [{"name": sn, "t0": round(a, 2), "t1": round(b, 2), **analyze(per[k])} for k, (sn, a, b) in enumerate(secs) if per[k]]}
     # a quick mixdown so the page can play the song with a suggested sound in it
     peak = float(np.abs(mix).max()) or 1.0
-    mixfile = os.path.join(ROOT, "galaxy", "data", "stage_mix.ogg")
+    import mix_index
+    sl = mix_index.slug(name)
+    sdir = os.path.join(ROOT, "galaxy", "data", "stages")
+    os.makedirs(sdir, exist_ok=True)
+    mixfile = os.path.join(sdir, sl + "_mix.ogg")
     try:
         sf.write(mixfile, (mix.T / peak * 0.89).astype(np.float32), SR, format="OGG", subtype="VORBIS")
-        data["mix"] = "data/stage_mix.ogg"
+        data["mix"] = "data/stages/" + sl + "_mix.ogg"
     except Exception as e:
         notes.append(f"could not write the preview mix ({e})")
-    out = os.path.join(ROOT, "galaxy", "data", "stage_data.js")
-    with open(out, "w", encoding="utf-8") as fh:
-        fh.write("window.STAGE = " + json.dumps(data, separators=(",", ":")) + ";\n")
+    blob = "window.STAGE = " + json.dumps(data, separators=(",", ":")) + ";\n"
+    out = os.path.join(ROOT, "galaxy", "data", "stage_data.js")   # the newest song, opened by stage.html on its own
+    for path in (out, os.path.join(sdir, sl + ".js")):            # plus one copy per song for the Mixes menu
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(blob)
+    mix_index.register("stage", name, "stage.html?s=" + sl, f"{len(keep)} parts")
     print(f"{len(keep)} parts measured over {len(data['sections'])} sections, {len(data['clashes'])} clashes, {len(data['gaps'])} open spots -> {out}")
     for n in notes:
         print("  " + n)

@@ -24,6 +24,12 @@ def main():
     ap.add_argument("--page", default="index.html", help="page to open, for example voice.html")
     a = ap.parse_args()
     cfg = SC.load()
+    try:                                            # list older Mix Check reports and Mix Stages in the Mixes menu
+        sys.path.insert(0, os.path.join(os.path.dirname(HERE), "mixmath"))
+        import mix_index
+        mix_index.backfill(cfg.get("projects"))
+    except Exception:
+        pass
     norm = lambda p: os.path.normcase(os.path.realpath(p)).rstrip("\\/") + os.sep
     roots = [norm(s["path"]) for s in cfg["sample_folders"]] + [norm(cfg["library"])]
 

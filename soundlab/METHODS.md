@@ -100,6 +100,10 @@ Weighted Euclidean distance over the 7 ranked measures. Each measure belongs to 
 
 A dropped file is decoded by the browser and measured there with the same steps as `analyze_samples.py`: mono mix of the first 30 seconds, 2048-point Hann frames with a 512 hop, spectral centroid, spectral flatness, peak-to-RMS crest, the share of energy from 20 to 250 Hz, time to the loudest frame, duration, and side-to-mid ratio for width. Each value goes through the same transform as the library (for example log of centroid) and is then placed on the library's 1 to 255 scale by finding where it falls among 256 stored quantiles of that measure (`featQ` in galaxy_data.js). The nearest sounds use the weighted distance above. Small differences from the Python measures are expected (the browser resamples some formats), so treat the match as close, not exact. The file never leaves your computer.
 
+### Search by mouth
+
+The Galaxy records two seconds from the microphone, trims it to the part louder than 8% of its peak (plus 10 ms before and 30 ms after), and measures it exactly like a dropped file. Mouth sounds are not instruments, so the closest matches share color and shape (dark, noisy, short, punchy) rather than being the same instrument. Nothing is saved or uploaded.
+
 ### Color by vendor
 
 Each top-level source (the `name` of a sample folder) gets its own hue. Name a folder of your own recordings "Mine" to see where they sit among the packs.
@@ -179,6 +183,8 @@ While teaching, the page also keeps 0.4 s of each hit and measures it the same w
 Pitch comes from the YIN method on a 2048-sample window about 60 times a second, from 65 Hz to 1 kHz, with a confidence cutoff and a level gate. The pitch is snapped to the nearest note in the chosen key and scale. A note starts after two steady frames, changes after three, and stops after four quiet frames, which keeps vibrato and scoops from making extra notes.
 
 ### Loop recorder and MIDI
+
+Swing moves every second sixteenth later by up to 30% of a sixteenth, the same as the beat playground, and is applied together with snapping. A beat sent from the playground arrives as one take: each row's steps on its pad for every bar, loops once per loop length.
 
 Hits and notes are stored by their position in the loop and snapped to the grid only on playback and export, at the chosen strength, so changing the grid later never loses the original timing. The MIDI file is type 1 at 480 ticks per beat with a tempo event: drums on channel 10 with General MIDI notes (kick 36, snare 38, closed hat 42, open hat 46, clap 39, rim 37, tom 45, perc 56), melody on channel 1.
 
