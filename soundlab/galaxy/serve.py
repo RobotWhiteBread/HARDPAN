@@ -6,7 +6,7 @@ a plain file, browsers only allow simple one-at-a-time playback.
 Only this computer can connect (the server listens on 127.0.0.1), and it only hands out
 audio files that live inside the sample folders and library listed in soundlab.json.
 
-  python serve.py [--port 8765] [--no-open]
+  python serve.py [--port 8765] [--no-open] [--page voice.html]
 """
 import argparse, http.server, mimetypes, os, sys, urllib.parse, webbrowser
 
@@ -21,6 +21,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", type=int, default=8765)
     ap.add_argument("--no-open", action="store_true")
+    ap.add_argument("--page", default="index.html", help="page to open, for example voice.html")
     a = ap.parse_args()
     cfg = SC.load()
     norm = lambda p: os.path.normcase(os.path.realpath(p)).rstrip("\\/") + os.sep
@@ -60,7 +61,7 @@ def main():
             continue
     if srv is None:
         raise SystemExit("No free port found for the Galaxy server.")
-    url = f"http://127.0.0.1:{srv.server_address[1]}/index.html"
+    url = f"http://127.0.0.1:{srv.server_address[1]}/{a.page}"
     print(f"Sound Galaxy running at {url}")
     print("Leave this window open while you use it. Press Ctrl+C to stop.")
     if not a.no_open:

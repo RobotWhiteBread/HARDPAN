@@ -22,6 +22,7 @@ shows which ones you actually use, and puts them all on a 3D map you can fly thr
 - **Sound Galaxy:** hover to hear a sound, click for its closest matches, find near-identical copies across packs, ask for "a dark, short snare in F minor" and audition a shortlist with the arrow keys.
 - **Drop a file:** drag any recording onto the map to find what you own that sounds closest to it.
 - **Beat playground:** every sound you audition swaps into a looping beat, so you hear it in a groove.
+- **Voice Pads:** beatbox and hum into the mic to play your own samples and a synth, match your mouth sounds to the closest sounds you own, record loops and export MIDI for REAPER.
 - **Mix Stage:** your song as a 3D stage (pan, pitch, depth) that glows as it plays, with clashes marked, open spots found, and sounds from your own library that fit each spot, heard right inside the song.
 - **Carts and kits:** save picks as plain folders for any DAW; REAPER users get scripts that build kits and songs.
 

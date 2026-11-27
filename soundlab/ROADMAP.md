@@ -18,6 +18,7 @@ What is done, what is next, and ideas being weighed. Suggestions and pull reques
 - Setup wizard: `soundlab.py setup` finds sample and project folders and writes soundlab.json
 - Mix Stage: a song drawn by pan, pitch and depth, with clashes, open spots and library sounds that fit them
 - Mix Stage over time (a stage per section), suggestions heard inside the song, and an own-recordings-first switch
+- Voice Pads: beatbox and hum into the mic to play your own samples and a synth, match your mouth sounds to the library, record loops and export MIDI
 
 ## Next
 

@@ -158,7 +158,35 @@ The preview is a plain sum of the parts, scaled to -1 dBFS peak, saved as OGG at
 
 "Only my own sounds" keeps sources named in "mine" or "public_allow" in soundlab.json, plus any source named "Mine". The Galaxy's Show menu has the same filter.
 
-## 4. Limits
+## 4. Voice Pads (galaxy/voice.html)
+
+Voice Pads listens to the microphone in the browser. Nothing is recorded to disk or sent anywhere.
+
+### Catching hits
+
+An AudioWorklet looks at the mic in blocks of 128 samples (about 3 ms). It keeps a slow noise floor and calls a hit when a block is louder than the floor times a threshold, louder than 1.6 times the average of the last four blocks, above a minimum level, and at least 70 ms after the last hit. The Sensitivity slider moves the threshold and the minimum level. The hit time is the start of the block where it began, so recorded timing does not depend on how long the classifier waits.
+
+### Telling sounds apart
+
+After a hit the page takes a short window (512, 1024 or 2048 samples, set by Speed; about 11, 21 or 43 ms at 48 kHz) and measures 14 log-spaced bands from 50 Hz to 14 kHz relative to their mean, plus spectral centroid, flatness, zero crossings and level. When you teach a pad, six of your hits are stored. Each new hit is compared with every stored example after scaling each measure by its spread across all examples, and the three nearest vote, weighted by closeness. Before any pad is taught, a simple rule guesses: low centroid and few zero crossings is a kick, very bright or noisy is a hat, anything between is a snare.
+
+### Match my mouth
+
+While teaching, the page also keeps 0.4 s of each hit and measures it the same way the drop-a-file search does (brightness, noise, low end, attack, punch), then ranks those values against the library's own quantiles. The pad's sound type (kick, snare, hats...) limits the candidates, and the closest 20 by weighted distance become the pad's match list. Mouth sounds are not drum sounds, so this finds sounds with a similar color and shape, not copies.
+
+### Hum to melody
+
+Pitch comes from the YIN method on a 2048-sample window about 60 times a second, from 65 Hz to 1 kHz, with a confidence cutoff and a level gate. The pitch is snapped to the nearest note in the chosen key and scale. A note starts after two steady frames, changes after three, and stops after four quiet frames, which keeps vibrato and scoops from making extra notes.
+
+### Loop recorder and MIDI
+
+Hits and notes are stored by their position in the loop and snapped to the grid only on playback and export, at the chosen strength, so changing the grid later never loses the original timing. The MIDI file is type 1 at 480 ticks per beat with a tempo event: drums on channel 10 with General MIDI notes (kick 36, snare 38, closed hat 42, open hat 46, clap 39, rim 37, tom 45, perc 56), melody on channel 1.
+
+### Limits
+
+A browser adds latency on top of the audio interface's own, usually 20 to 60 ms from mouth to sound, so live playing feels a bit behind; recordings are not affected because hit times come from the mic. Use headphones so the speakers do not trigger the pads. Teaching in the room and with the mic you will use works best.
+
+## 5. Limits
 
 - Types, keys and tempos are educated guesses. Key detection on drums and noise is unreliable, which is why it is skipped when the spectrum is too flat.
 - Only the first 30 seconds of a long file are measured.
