@@ -133,6 +133,7 @@ sets, or packs whose makers have said yes in writing.
 | Example | Needs |
 |---|---|
 | `galaxy_demo/make_demo.py`: demo video and photos | ffmpeg, Pillow, sounds of your choice |
+| `ufo_cowboy_crate/`: a made-up crate of 134 synthesized UFO and cowboy sounds from five invented vendors, measured by the real pipeline. Open `index.html` to try the crate view with no library of your own | a browser |
 
 ## Roadmap
 
