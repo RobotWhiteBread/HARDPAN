@@ -22,8 +22,9 @@
     nav.className = "hpnav" + (slot ? "" : " float");
     const link = (href, label, page) => `<a href="${base}${href}" class="${here === page ? "on" : ""}">${label}</a>`;
     nav.innerHTML = link("index.html", "Galaxy", "index.html") + link("voice.html", "Voice Pads", "voice.html")
-      + link("stage.html", "Mix Stage", "stage.html") + `<button type="button" class="hpMixBtn">Mixes</button>`;
+      + link("stage.html", "Mix Stage", "stage.html") + `<button type="button" class="hpMixBtn">Mixes</button>` + link("pipeline.html", "How it works", "pipeline.html");
     (slot || document.body).appendChild(nav);
+    navEl = nav; addExtra();
     const panel = document.createElement("div"); panel.className = "hpmix"; document.body.appendChild(panel);
     nav.querySelector(".hpMixBtn").onclick = e => { e.stopPropagation(); panel.style.display = panel.style.display === "block" ? "none" : "block"; if (panel.style.display === "block") fill(panel); };
     document.addEventListener("click", e => { if (!panel.contains(e.target)) panel.style.display = "none"; });
@@ -37,6 +38,14 @@
       + `<h3>Mix Check reports</h3>${checks.map(row).join("") || '<div class="hint">None yet.</div>'}`
       + `<div class="hint">Add a song: <code>py soundlab.py stage song.rpp</code> draws its Mix Stage, <code>py soundlab.py check song.wav</code> writes a Mix Check report. Both show up here.</div>`;
   }
+  // extra tabs of your own: window.EXTRA_TABS = [{ label, href }] in data/tabs.js (kept out of git with the rest of data/)
+  let navEl = null;
+  function addExtra() {
+    if (!navEl || !window.EXTRA_TABS || navEl.dataset.extra) return; navEl.dataset.extra = "1";
+    for (const t of window.EXTRA_TABS) { const a = document.createElement("a"); a.href = base + t.href; a.textContent = t.label;
+      if (location.pathname.endsWith("/" + t.href.split("/").pop())) a.className = "on"; navEl.appendChild(a); }
+  }
   const s = document.createElement("script"); s.src = base + "data/mixes.js"; s.onerror = () => {}; document.head.appendChild(s);
+  const x = document.createElement("script"); x.src = base + "data/tabs.js"; x.onload = addExtra; x.onerror = () => {}; document.head.appendChild(x);
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", build); else build();
 })();

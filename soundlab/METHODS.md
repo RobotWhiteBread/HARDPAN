@@ -188,6 +188,10 @@ Swing moves every second sixteenth later by up to 30% of a sixteenth, the same a
 
 Hits and notes are stored by their position in the loop and snapped to the grid only on playback and export, at the chosen strength, so changing the grid later never loses the original timing. The MIDI file is type 1 at 480 ticks per beat with a tempo event: drums on channel 10 with General MIDI notes (kick 36, snare 38, closed hat 42, open hat 46, clap 39, rim 37, tom 45, perc 56), melody on channel 1.
 
+### MIDI controllers
+
+The pages listen with the Web MIDI API. Notes on channel 10 from 36 to 51 count as pads (the MiniLab 3 sends bank A as 36 to 43 and bank B as 44 to 51), every other note counts as a key. In the Galaxy, a key plays the selected sound at a playback rate of 2 to the power of (note minus 60) over 12, so middle C is the sound as recorded and each key up is a semitone higher (and shorter). Pads recorded into the beat playground go to the sixteenth nearest the moment you hit them, after walking back from the scheduler's look-ahead to the step actually being heard.
+
 ### Limits
 
 A browser adds latency on top of the audio interface's own, usually 20 to 60 ms from mouth to sound, so live playing feels a bit behind; recordings are not affected because hit times come from the mic. Use headphones so the speakers do not trigger the pads. Teaching in the room and with the mic you will use works best.

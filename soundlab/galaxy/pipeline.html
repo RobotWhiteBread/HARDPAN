@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>soundlab: How it works</title>
+<style>
+  :root { --bg:#07090d; --panel:#0f141c; --line:#232b38; --text:#dde3ec; --dim:#8794a6; --accent:#7aa2ff; --gold:#f2a93b; --open:#63e6be; --hot:#ff6b6b; --violet:#c58bff; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { display:flex; flex-wrap:wrap; gap:12px; align-items:center; padding:10px 18px; border-bottom:1px solid var(--line); background:var(--panel); position:sticky; top:0; z-index:5; }
+  header h1 { font-size:18px; margin:0 8px 0 0; }
+  .modes { display:flex; gap:4px; margin-left:auto; }
+  .modes button, .legend span { background:#1b2533; color:var(--text); border:1px solid var(--line); border-radius:6px; padding:4px 12px; font:inherit; font-size:13px; cursor:pointer; }
+  .modes button.on { background:#22304a; border-color:var(--accent); }
+  .intro { max-width:1100px; margin:14px auto 0; padding:0 18px; color:var(--dim); }
+  .legend { display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; font-size:12px; }
+  .legend span { cursor:default; padding:2px 9px; }
+  #wrap { position:relative; max-width:1180px; margin:10px auto 40px; padding:10px 18px; }
+  #flow { display:grid; grid-template-columns:repeat(4, 1fr); gap:34px 26px; position:relative; z-index:1; }
+  svg#arrows { position:absolute; inset:0; width:100%; height:100%; z-index:0; pointer-events:none; overflow:visible; }
+  .node { background:var(--panel); border:1px solid var(--line); border-left:4px solid var(--c, var(--accent)); border-radius:10px; padding:10px 12px; cursor:pointer; transition:border-color .15s, transform .15s; }
+  .node:hover, .node.sel { border-color:var(--c, var(--accent)); transform:translateY(-1px); }
+  .node .k { font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:var(--c, var(--accent)); }
+  .node h3 { margin:2px 0 4px; font-size:15px; }
+  .node p { margin:0; font-size:13px; color:#c3ccd8; }
+  .node code, #detail code { color:var(--gold); font-size:12px; }
+  .node .out { margin-top:6px; font-size:11px; color:var(--dim); }
+  .span2 { grid-column:span 2; }
+  #detail { max-width:1180px; margin:0 auto 60px; padding:0 18px; }
+  #detail .box { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:14px 16px; display:none; }
+  #detail h2 { margin:0 0 6px; font-size:17px; }
+  #detail .cols { display:grid; grid-template-columns:repeat(3, 1fr); gap:14px; }
+  #detail h4 { margin:8px 0 4px; font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:var(--dim); }
+  #detail p { margin:0 0 6px; font-size:13px; }
+  @media (max-width: 900px) { #flow { grid-template-columns:1fr 1fr; } #detail .cols { grid-template-columns:1fr; } .span2 { grid-column:span 2; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>How it works</h1>
+  <div id="hpNav"></div>
+  <div class="modes"><button data-m="plain" class="on">Plain English</button><button data-m="science">Science</button><button data-m="music">Music</button></div>
+</header>
+<div class="intro">
+  Every step from a sample pack you bought to a song coming out of REAPER. Switch the explanation at the top right, and click any box for all three views plus the command, the file it writes and what it hands to the next step.
+  <div class="legend"><span style="border-left:4px solid #8fa3b8">your files</span><span style="border-left:4px solid #7aa2ff">catalog and measure</span><span style="border-left:4px solid #63e6be">the map</span><span style="border-left:4px solid #c58bff">tools you play with</span><span style="border-left:4px solid #f2a93b">REAPER and out</span><span style="border-left:4px solid #ff6b6b">public safety</span></div>
+</div>
+<div id="wrap"><svg id="arrows"></svg><div id="flow"></div></div>
+<div id="detail"><div class="box" id="box"></div></div>
+
+<script src="toolbar.js"></script>
+<script>
+"use strict";
+const C = { files: "#8fa3b8", measure: "#7aa2ff", map: "#63e6be", tools: "#c58bff", reaper: "#f2a93b", safe: "#ff6b6b" };
+// grid: col 1-4, row 1-n. Each node has the three explanations, the command, what it writes, and what it feeds.
+const N = [
+  { id: "buy", col: 1, row: 1, kind: "files", k: "Start", t: "Packs you bought",
+    plain: "Zip files from Drum Broker, Samples From Mars, Loud Foundry, ModeAudio, Clark Audio, Ocular Sounds and others, plus your own recordings.",
+    science: "Compressed archives of PCM audio (mostly 24-bit WAV at 44.1 to 96 kHz), sometimes nested zips and Mac resource-fork junk (__MACOSX, ._ files).",
+    music: "Your crate. Drum hits, loops, one-shots, field recordings and foley, all royalty-free to use in your own tracks.",
+    cmd: "PowerShell unzip, then a copy of each zip on H:", out: "C:\\HARDPAN\\studio_setup\\samples\\<vendor>\\", next: "Sample folders" },
+  { id: "folders", col: 2, row: 1, kind: "files", k: "Step 0", t: "Sample folders",
+    plain: "One folder per vendor. soundlab.json lists where they are and which ones are your own recordings.",
+    science: "A config file (JSON) holding root paths, exclusion patterns (regular expressions), the REAPER project folder and an allow list for public material.",
+    music: "Your sample library, organized by who made it.",
+    cmd: "py soundlab.py setup  (finds folders for you)", out: "soundlab.json", next: "Build" },
+  { id: "projects", col: 3, row: 3, kind: "files", k: "Input", t: "Your REAPER projects",
+    plain: "The songs you have made. soundlab reads them to see which samples you actually use, and the Mix Stage draws them.",
+    science: ".rpp files are plain text: tracks, items, file paths, volume, pan, start offsets, play rates, tempo and markers are parsed line by line.",
+    music: "Your sessions. Which sounds made the cut, where everything sits in the mix.",
+    cmd: "nothing to run, read automatically", out: "read only, never changed", next: "Map, Mix Stage" },
+  { id: "build", col: 2, row: 2, kind: "measure", k: "Step 1", t: "Build the catalog",
+    plain: "Lists every sound, guesses what it is from its name and folder (kick, loop, 90 BPM, A minor) and makes browse folders for REAPER without copying anything.",
+    science: "Directory walk with long-path support. File and folder names are tokenized and matched against role, tempo and key patterns. Browse folders are hard links, so they cost no disk space.",
+    music: "Sorts the crate: kicks with kicks, loops by tempo and key, so REAPER's Media Explorer becomes a tidy browser.",
+    cmd: "py soundlab.py build", out: "_library\\ (hard links) and catalog.csv. Today: 197,737 files", next: "Analyze" },
+  { id: "analyze", col: 2, row: 3, kind: "measure", k: "Step 2", t: "Measure every sound",
+    plain: "Listens to each file once and writes down how it sounds: bright or dark, punchy or soft, how much low end, how noisy, how long, how fast it hits, its tempo and key.",
+    science: "Short-time Fourier transform per file. Spectral centroid (brightness), crest factor (peak to RMS, punch), energy below 60 and 250 Hz (sub, low end), spectral flatness (noise), side to mid ratio (width), time to peak (attack), tempo from the autocorrelation of the onset envelope (nudged toward whole bars for loops) and key by correlating a 12-note chroma profile with major and minor templates. Runs on all CPU cores and resumes where it left off.",
+    music: "The ears. It hears every sample so you don't have to audition 189,000 files to find the dark punchy kick.",
+    cmd: "py soundlab.py analyze", out: "_library\\features.csv (one row per sound)", next: "Map" },
+  { id: "map", col: 2, row: 4, kind: "map", k: "Step 3", t: "Build the map",
+    plain: "Turns those measurements into a 3D map where sounds that sound alike sit together, finds copies of the same sound, and marks which ones you have used in songs.",
+    science: "Features are rank-scaled (256 quantiles each), grouped into 360 similarity islands by k-means, and the islands are placed in 3D with t-SNE so similar islands sit near each other. Near-identical files form families, cross-vendor nearest neighbors form bridges, and REAPER project paths are joined to mark used sounds. Waveform thumbnails are drawn once.",
+    music: "A crate you can fly through. Islands like 'dark lofi loops' or 'bright snappy hats', and a heat map of what you actually reach for.",
+    cmd: "py soundlab.py galaxy --waveforms", out: "galaxy\\data\\galaxy_data.js (189,268 sounds, 360 islands)", next: "Galaxy, Voice Pads, Mix Stage" },
+  { id: "galaxy", col: 1, row: 5, kind: "tools", k: "Play", t: "Sound Galaxy",
+    plain: "The 3D map in your browser. Hover to hear, click for the 14 closest sounds, filter by key and tempo, drop a file or beatbox to find what you own that sounds like it.",
+    science: "WebGL point cloud. Similarity is a weighted distance over the ranked features (your sliders set the weights). A dropped file or a 2-second mic recording is measured in the browser with the same features, then ranked against the library's quantiles.",
+    music: "Crate digging by ear. Find the kick that matches your snare, the loop in the right key, the sounds you paid for and never heard.",
+    cmd: "py soundlab.py serve", out: "carts and stars saved in the browser", next: "Carts, Voice Pads, beat playground" },
+  { id: "voice", col: 2, row: 5, kind: "tools", k: "Play", t: "Voice Pads",
+    plain: "Beatbox or hum into a mic, or play a MIDI controller. Taught your kick, snare and hat, it plays real samples from your library. Hum or play keys and it plays a synth in key. Record loops and export them.",
+    science: "AudioWorklet onset detection (energy over an adaptive floor), 18 spectral features per hit, k-nearest-neighbor vote against your taught examples. Pitch by the YIN method, snapped to a scale with hysteresis. Events stored by loop position, quantized only on playback and export.",
+    music: "A beatbox-to-drum-machine and hum-to-synth like Dubler, except the drums are your own crate, and 'Match my mouth' picks the sample closest to the sound you made.",
+    cmd: "py soundlab.py voice", out: "a .mid file in Downloads, your voice profile in the browser", next: "MIDI into REAPER" },
+  { id: "stage", col: 3, row: 5, kind: "tools", k: "Mix", t: "Mix Stage",
+    plain: "Draws a song as a 3D stage: left and right, low and high, front and back. Shows where parts crash into each other and where there is empty room, then suggests sounds to fill it.",
+    science: "Each part is rendered from the project, then a 2048-point STFT in 24 log bands gives pan per band, width (side over mid), level and attack. Occupancy grid of pitch by pan, clashes where two parts overlap in time, band and pan within 12 dB, gaps where nothing sits. Suggestions come from the map.",
+    music: "The mix engineer's picture of a song: kick and bass fighting at 97 Hz, a hole in the upper mids on the left, and a sound from your crate that would sit right there.",
+    cmd: "py soundlab.py stage song.rpp", out: "data\\stages\\<song>.js, listed under Mixes", next: "fix the mix in REAPER" },
+  { id: "check", col: 4, row: 5, kind: "tools", k: "Mix", t: "Mix Check",
+    plain: "A report card for a finished bounce: is it loud enough, is it clipping, is the low end solid, is it too wide or too narrow, and how does it compare to songs you like.",
+    science: "Integrated loudness by ITU-R BS.1770 (LUFS), true peak with oversampling, clipped samples, peak to loudness ratio, loudness range, low-end mono correlation, stereo width, tonal balance against reference tracks, and a 3D spectrogram.",
+    music: "Mastering ears. Tells you the hook doesn't lift, the bass falls apart in mono, or the track is 4 dB quieter than your references.",
+    cmd: "py soundlab.py check song.wav", out: "mix_checks\\<song>_mixcheck.html, listed under Mixes", next: "fix the mix in REAPER" },
+  { id: "carts", col: 1, row: 6, kind: "tools", k: "Collect", t: "Carts, kits and the beat playground",
+    plain: "Collect sounds into carts (one per song or mood), try them in a looping beat, and send a beat to Voice Pads to sing over it.",
+    science: "Carts are lists of file paths kept in browser storage, so they survive a rebuild. The playground schedules samples ahead of time on the audio clock and varispeeds loops to the tempo.",
+    music: "Pulling records for a session, then building the kit and the groove before you open the DAW.",
+    cmd: "in the Galaxy", out: "a Cart folder or soundlab_kit.txt", next: "REAPER" },
+  { id: "midi", col: 2, row: 6, kind: "tools", k: "Collect", t: "Loops and MIDI",
+    plain: "What you beatboxed or hummed, snapped to the beat, saved as a MIDI file REAPER understands.",
+    science: "Type 1 Standard MIDI File at 480 ticks per beat with a tempo event. Drums on channel 10 with General MIDI notes, melody on channel 1. Optional swing on every second sixteenth.",
+    music: "Your idea, on the grid. Drag it in and the kick, snare and hats land on any drum sampler.",
+    cmd: "Export MIDI for REAPER", out: "hardpan_voice_<date>_<bpm>.mid", next: "REAPER" },
+  { id: "reaper", col: 1, row: 7, kind: "reaper", k: "Make", t: "REAPER scripts", span: 2,
+    plain: "Lua scripts that build whole songs in REAPER from your samples: Iron Winter, Pixel Party, Deep Field, Camera and Bike, the DJ pads, kits from carts, and project upgrades.",
+    science: "ReaScript places media items with play rate and pitch, writes MIDI notes into ReaSynth, loads samplers (ReaSamplOmatic5000), adds effects, saves each project and renders through REAPER's own engine.",
+    music: "The producer chair. Arrangements with intros, drops and breaks, ready to rearrange, remix or play over with the MicroFreak.",
+    cmd: "Actions > Load ReaScript > run", out: "projects\\<set>\\*.rpp", next: "MP3s" },
+  { id: "public", col: 4, row: 4, kind: "safe", k: "Share", t: "Public demos and GitHub",
+    plain: "Pictures and demos for the public repo only use sounds you are allowed to show. Vendor sounds stay out until a vendor says yes in writing.",
+    science: "public_allow in soundlab.json is an allow list. The demo maker drops every source not on it and refuses to run if nothing is left. Personal data (galaxy data, carts, features) is git-ignored.",
+    music: "Show the tool, not someone else's sounds.",
+    cmd: "examples\\galaxy_demo\\make_demo.py", out: "images in demos\\ (only allowed sources)", next: "GitHub" },
+  { id: "songs", col: 1, row: 8, kind: "reaper", k: "Out", t: "Songs and MP3s", span: 2,
+    plain: "Finished renders you can play anywhere: your phone at Thanksgiving, a DJ set, a post.",
+    science: "MP3 (LAME) renders at 44.1 kHz stereo through a compressor and limiter on the master, plus a back-to-back full-set file per collection.",
+    music: "The bounce. Play it, share it, or pull it back into the Mix Check.",
+    cmd: "rendered automatically by each script", out: "projects\\<set>\\mp3\\", next: "Mix Check, the world" },
+];
+const E = [["buy", "folders"], ["folders", "build"], ["build", "analyze"], ["analyze", "map"], ["projects", "map"], ["map", "galaxy"], ["map", "voice"], ["map", "stage"],
+  ["projects", "stage"], ["galaxy", "carts"], ["voice", "midi"], ["carts", "reaper"], ["midi", "reaper"], ["reaper", "songs"], ["map", "public"]];
+
+let mode = "plain";
+const flow = document.getElementById("flow"), svg = document.getElementById("arrows"), box = document.getElementById("box");
+const esc = s => String(s).replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+function draw() {
+  flow.innerHTML = N.map(n => `<div class="node${n.span ? " span2" : ""}" id="n_${n.id}" style="--c:${C[n.kind]};grid-column:${n.col}${n.span ? " / span " + n.span : ""};grid-row:${n.row}">
+    <div class="k">${esc(n.k)}</div><h3>${esc(n.t)}</h3><p>${esc(n[mode])}</p><div class="out"><code>${esc(n.cmd)}</code></div></div>`).join("");
+  N.forEach(n => document.getElementById("n_" + n.id).onclick = () => show(n));
+  requestAnimationFrame(arrows);
+}
+function arrows() {
+  const w = document.getElementById("wrap").getBoundingClientRect();
+  let html = `<defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#4a5a72"/></marker></defs>`;
+  for (const [a, b] of E) {
+    const A = document.getElementById("n_" + a).getBoundingClientRect(), B = document.getElementById("n_" + b).getBoundingClientRect();
+    const ax = A.left + A.width / 2 - w.left, bx = B.left + B.width / 2 - w.left;
+    let x1, y1, x2, y2, d;
+    if (Math.abs(A.top - B.top) < 5) {                          // same row: side to side
+      const right = B.left > A.left; x1 = right ? A.right - w.left : A.left - w.left; y1 = A.top + A.height / 2 - w.top;
+      x2 = right ? B.left - w.left : B.right - w.left; y2 = B.top + B.height / 2 - w.top; d = `M${x1},${y1} L${x2},${y2}`;
+    } else {
+      const down = B.top > A.top;
+      x1 = ax; y1 = (down ? A.bottom : A.top) - w.top; x2 = bx; y2 = (down ? B.top : B.bottom) - w.top;
+      const my = (y1 + y2) / 2; d = `M${x1},${y1} C${x1},${my} ${x2},${my} ${x2},${y2}`;
+    }
+    html += `<path d="${d}" fill="none" stroke="#4a5a72" stroke-width="1.6" marker-end="url(#ah)"/>`;
+  }
+  svg.innerHTML = html;
+}
+function show(n) {
+  document.querySelectorAll(".node").forEach(x => x.classList.toggle("sel", x.id === "n_" + n.id));
+  box.style.display = "block";
+  box.innerHTML = `<h2>${esc(n.t)}</h2><div class="cols"><div><h4>Plain English</h4><p>${esc(n.plain)}</p></div><div><h4>Science</h4><p>${esc(n.science)}</p></div><div><h4>Music</h4><p>${esc(n.music)}</p></div></div>
+    <div class="cols"><div><h4>Run it</h4><p><code>${esc(n.cmd)}</code></p></div><div><h4>Writes</h4><p><code>${esc(n.out)}</code></p></div><div><h4>Feeds</h4><p>${esc(n.next)}</p></div></div>`;
+  box.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+document.querySelectorAll(".modes button").forEach(b => b.onclick = () => { mode = b.dataset.m; document.querySelectorAll(".modes button").forEach(x => x.classList.toggle("on", x === b)); draw(); });
+addEventListener("resize", arrows);
+draw();
+</script>
+</body>
+</html>

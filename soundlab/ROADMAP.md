@@ -19,6 +19,7 @@ What is done, what is next, and ideas being weighed. Suggestions and pull reques
 - Mix Stage: a song drawn by pan, pitch and depth, with clashes, open spots and library sounds that fit them
 - Mix Stage over time (a stage per section), suggestions heard inside the song, and an own-recordings-first switch
 - Voice Pads: beatbox and hum into the mic to play your own samples and a synth, match your mouth sounds to the library, record loops and export MIDI
+- MIDI controller input: pads and keys play Voice Pads, the beat playground and the selected Galaxy sound
 - One tool bar on every page with a Mixes menu of staged songs and Mix Check reports; search the Galaxy by mouth; sounds, carts and beat playground patterns move between the Galaxy and Voice Pads
 
 ## Next

@@ -284,6 +284,7 @@
     <label style="font-size:12px">BPM <input type="text" id="beatBpm" value="90" style="width:44px"></label>
     <label style="font-size:12px">Swing <input type="range" id="beatSwing" min="0" max="30" value="8" style="width:70px"></label>
     <button id="beatRoll">Reroll unlocked</button><button id="beatCart">From cart</button><button id="beatToCart">Kit to cart</button><button id="beatVoice" title="Open this beat in Voice Pads to beatbox or hum on top, then export MIDI">To Voice Pads</button>
+    <label style="font-size:12px" title="While the beat plays, pads you hit on your controller are written into the pattern on the nearest 16th"><input type="checkbox" id="padRec"> record pads</label>
     <button id="beatClose" style="margin-left:auto">Close</button>
   </div>
   <div id="beatNote" class="hint" style="margin-top:4px"></div>
@@ -315,6 +316,7 @@
 <script src="data/galaxy_data.js"></script>
 <script src="data/galaxy_thumbs.js" onerror="window.THUMBS=null"></script>
 <script src="toolbar.js"></script>
+<script src="midiin.js"></script>
 <script type="importmap">
 { "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/" } }
@@ -1519,6 +1521,38 @@ $("beatBtn").onclick = () => openBeat(!beat.open); $("beatClose").onclick = () =
 $("beatPlay").onclick = () => { if (!SERVE) return; beat.on ? beatStop() : beatStart(); };
 $("beatRoll").onclick = () => { beat.rows.forEach(r => { if (!r.lock) r.sound = pickFor(r, r.sound >= 0 && Math.random() < 0.5 ? r.sound : -1); load(r.sound); }); drawBeat(); };
 $("beatCart").onclick = () => { for (const r of beat.rows) { if (r.lock) continue; const c = cart.filter(j => r.types.includes(typeName(j))).sort((a, b) => stars.has(pathOf(b)) - stars.has(pathOf(a))); if (c.length) r.sound = c[0]; load(r.sound); } drawBeat(); };
+// ---------- MIDI controller: pads 1-5 play the beat rows (and can record into the pattern), pads 6-8 play the closest sounds
+// to the selected one, keys play the selected sound up and down in pitch (middle C = as recorded)
+const keyHeld = new Map();
+window.HPMIDI && HPMIDI.on(e => {
+  if (!SERVE) { $("status").textContent = "Your controller needs the Galaxy's local server: py soundlab.py serve"; return; }
+  const c = ctx();
+  if (e.kind === "pad" && e.on) {
+    if (e.pad < beat.rows.length) {
+      const r = beat.rows[e.pad]; if (r.sound < 0) return; load(r.sound); trig(r, c.currentTime);
+      if (beat.on && $("padRec").checked) {
+        const spb = 60 / Math.max(40, Math.min(220, +$("beatBpm").value || 90)) / 4;
+        let t = beat.next, st = beat.step;                  // the scheduler runs ahead: walk back to the step being heard now
+        while (t - spb > c.currentTime && st > 0) { t -= spb; st--; }
+        const s = ((t - c.currentTime < spb / 2 ? st : st - 1) % 16 + 16) % 16;
+        r.steps[s] = true; drawBeat();
+      }
+    } else if (nb[e.pad - beat.rows.length] !== undefined) play(nb[e.pad - beat.rows.length]);
+  } else if (e.kind === "key") {
+    if (e.on) {
+      if (sel < 0) { $("status").textContent = "Pick a sound on the map, then play it from your keys."; return; }
+      load(sel).then(b => {
+        if (!b) return;
+        const src = c.createBufferSource(), g = c.createGain(); src.buffer = b; src.playbackRate.value = Math.pow(2, (e.note - 60) / 12);
+        g.gain.value = 0.3 + e.vel * 0.7; src.connect(g).connect(c.destination); src.start();
+        const old = keyHeld.get(e.note); if (old) { try { old.src.stop(); } catch (x) {} } keyHeld.set(e.note, { src, g });
+      });
+    } else {
+      const k = keyHeld.get(e.note); if (!k) return; keyHeld.delete(e.note);
+      const t = c.currentTime; k.g.gain.setTargetAtTime(0, t, 0.08); try { k.src.stop(t + 0.5); } catch (x) {}
+    }
+  }
+});
 $("beatVoice").onclick = () => {
   try { localStorage.setItem("soundlab_beat_handoff", JSON.stringify({ bpm: +$("beatBpm").value || 90, swing: +$("beatSwing").value,
     rows: beat.rows.map(r => ({ key: r.key, path: r.sound >= 0 ? pathOf(r.sound) : "", steps: r.steps })), at: Date.now() })); } catch (e) {}

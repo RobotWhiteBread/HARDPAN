@@ -111,13 +111,14 @@
       <button id="clearBtn">Clear</button>
       <button id="midiBtn">Export MIDI for REAPER</button>
     </div>
-    <div class="hint">Recording keeps going around the loop so you can layer: kick on the first pass, hats on the next, then switch to melody and hum a line. Each pass is one take for Undo. Drums export on channel 10 with General MIDI notes, the melody on channel 1.</div>
+    <div class="hint">Recording keeps going around the loop so you can layer: kick on the first pass, hats on the next, then switch to melody and hum a line. Each pass is one take for Undo. A MIDI controller works too: pads 1 to 9 play the pads in order (MiniLab 3 bank A, then bank B for Layer) and the keys play the melody sound, all recorded. Drums export on channel 10 with General MIDI notes, the melody on channel 1.</div>
     <canvas id="roll"></canvas>
   </section>
 </main>
 
 <script src="data/galaxy_data.js" onerror="window.GALAXY=null"></script>
 <script src="toolbar.js"></script>
+<script src="midiin.js"></script>
 <script>
 "use strict";
 const $ = id => document.getElementById(id);
@@ -517,7 +518,7 @@ function startTransport(countIn) {
 function stopTransport() { T.playing = false; T.rec = false; clearInterval(T.timer); $("playBtn").textContent = "Play loop"; $("playBtn").classList.remove("on"); $("recBtn").classList.remove("on"); $("recBtn").textContent = "Record (1 bar count-in)"; if (mel.cur !== null) noteOff(); save(); }
 $("playBtn").onclick = () => T.playing ? stopTransport() : startTransport(false);
 $("recBtn").onclick = () => {
-  if (!worklet) return say("Start the mic first.");
+  getCtx(); ctx.resume();                       // the mic is optional here: a MIDI controller can record too
   if (T.rec) { T.rec = false; $("recBtn").classList.remove("on"); $("recBtn").textContent = "Record (1 bar count-in)"; say("Stopped recording. The loop keeps playing."); return; }
   T.take++; T.rec = true; $("recBtn").classList.add("on"); $("recBtn").textContent = "Stop recording";
   if (!T.playing) { startTransport(true); say("Count-in: 1, 2, 3, 4..."); setTimeout(() => T.rec && say("Recording. Every pass around the loop adds a layer."), spb() * 4000); }
@@ -654,6 +655,29 @@ function loadBeat(auto) {
   drawPads(); save(); say(`Loaded the beat playground: ${n} hits over ${bars} bars at ${$("bpm").value} BPM. Press Space to hear it, then Record to beatbox or hum on top. Undo removes it.`);
 }
 $("fromBeat").onclick = () => loadBeat(false);
+
+// ---------------------------------------------------------------- MIDI controller: pads play the pads, keys play the melody sound
+const keyVoices = new Map();
+function wake() { getCtx(); if (ctx.state !== "running") { ctx.resume(); if (ctx.state !== "running") say("Click anywhere on the page once so the browser lets your controller make sound."); } }
+window.HPMIDI && HPMIDI.on(e => {
+  if (e.kind === "pad" && e.on) {
+    if (e.pad >= pads.length) return; wake();
+    const p = pads[e.pad], vel = Math.max(0.2, e.vel);
+    playSample(p.sound, 0, vel); flash(e.pad); midiOut(0x99, p.note, Math.round(vel * 127), 0x89, 60);
+    record({ k: "d", pad: e.pad, t: ctx.currentTime - (ctx.outputLatency || 0), vel });
+  } else if (e.kind === "key") {
+    wake();
+    if (e.on) {
+      if (keyVoices.has(e.note)) return;
+      const notes = $("chords").checked ? chordOf(e.note) : [e.note], v = makeVoice(notes, Math.max(0.25, e.vel));
+      keyVoices.set(e.note, { v, rec: recOpen(e.note, e.vel, notes) }); drawNote(e.note);
+      notes.forEach(n => midiOut(0x90, n, Math.round(e.vel * 127)));
+    } else {
+      const k = keyVoices.get(e.note); if (!k) return; keyVoices.delete(e.note);
+      killVoice(k.v); recClose(k.rec); k.v.notes.forEach(n => midiOut(0x80, n, 0)); if (!keyVoices.size) drawNote(null);
+    }
+  }
+});
 
 function frame() { melodyTick(); drawRoll(); requestAnimationFrame(frame); }
 
