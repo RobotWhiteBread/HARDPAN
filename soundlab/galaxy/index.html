@@ -202,6 +202,7 @@
     <button id="fillBtn">Build a kit around this</button>
     <button id="copyBtn">Copy path</button>
     <button id="padBtn" title="Put this sound on the matching Voice Pads pad">Send to Voice Pads</button>
+    <button id="coachBtn" title="Make this the target in Get This Sound: what you own that is close, how to record it, what to search for">Get this sound</button>
   </div>
   <div id="fillBox" style="display:none">
     <h2>Suggested kit</h2>
@@ -959,6 +960,11 @@ function select(i, autoplay = true) {
 }
 $("sameType").onchange = () => sel >= 0 && select(sel, false);
 $("playBtn").onclick = () => sel >= 0 && play(sel);
+$("coachBtn").onclick = () => {
+  if (sel < 0) return;
+  try { localStorage.setItem("soundlab_coach_target", JSON.stringify({ path: pathOf(sel), at: Date.now() })); } catch (e) {}
+  location.href = "coach.html";
+};
 $("padBtn").onclick = () => {
   if (sel < 0) return;
   try { localStorage.setItem("soundlab_voice_inbox", JSON.stringify({ path: pathOf(sel), type: typeName(sel), at: Date.now() })); } catch (e) {}

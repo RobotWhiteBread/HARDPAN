@@ -22,7 +22,7 @@
     nav.className = "hpnav" + (slot ? "" : " float");
     const link = (href, label, page) => `<a href="${base}${href}" class="${here === page ? "on" : ""}">${label}</a>`;
     nav.innerHTML = link("index.html", "Galaxy", "index.html") + link("voice.html", "Voice Pads", "voice.html")
-      + link("stage.html", "Mix Stage", "stage.html") + `<button type="button" class="hpMixBtn">Mixes</button>` + link("pipeline.html", "How it works", "pipeline.html");
+      + link("stage.html", "Mix Stage", "stage.html") + `<button type="button" class="hpMixBtn">Mixes</button>` + link("coach.html", "Get This Sound", "coach.html") + link("pipeline.html", "How it works", "pipeline.html");
     (slot || document.body).appendChild(nav);
     navEl = nav; addExtra();
     const panel = document.createElement("div"); panel.className = "hpmix"; document.body.appendChild(panel);
